@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Pull Request"
+  short_description: "High-signal review grounded in repository and diff evidence"
+  default_prompt: "Use $review-pull-request to review the current diff and report only evidence-backed issues."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Change Impact"
+  short_description: "Map requirements and diffs to affected scopes, risks, and tests"
+  default_prompt: "Use $analyze-change-impact to map this requirement to affected applications, packages, risks, and tests."

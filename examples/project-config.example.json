@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "rules": {
+    "cssUnits": [
+      {
+        "id": "CSS001",
+        "pathPrefixes": ["apps/mobile-web/"],
+        "unit": "px",
+        "replacementUnit": "rem",
+        "scale": 10,
+        "allowedValues": [1],
+        "severity": "error",
+        "exceptionSeverity": "warning"
+      }
+    ],
+    "forbiddenImports": [
+      {
+        "id": "TOAST001",
+        "pathPrefixes": ["apps/"],
+        "sources": ["legacy-toast"],
+        "message": "Import the repository-approved notification wrapper instead.",
+        "suggestion": "Use @acme/ui-notifications."
+      },
+      {
+        "id": "ROUTER001",
+        "pathPrefixes": ["apps/mobile-web/"],
+        "sources": ["framework-router"],
+        "suggestion": "Use the application's safe router wrapper."
+      }
+    ],
+    "precisionImports": [
+      {
+        "id": "PRECISION001",
+        "pathPrefixes": ["apps/", "packages/"],
+        "sources": ["bignumber.js"],
+        "preferredSymbol": "DecimalMath",
+        "preferredSource": "@acme/shared-utils"
+      }
+    ],
+    "sharedUtilities": {
+      "enabled": true,
+      "target": "packages/shared-utils",
+      "importSource": "@acme/shared-utils"
+    },
+    "packageChangeReminder": true
+  },
+  "impact": {
+    "pairedApplications": [
+      {
+        "name": "regional-web-surfaces",
+        "scopes": ["apps/mobile-web", "apps/regional-web"]
+      }
+    ],
+    "riskRecommendations": [
+      {
+        "riskDomain": "phone",
+        "scopes": ["packages/shared-utils"],
+        "reason": "Phone normalization is shared across applications."
+      },
+      {
+        "riskDomain": "financial",
+        "scopes": ["packages/money-core"],
+        "reason": "Financial behavior should reuse the shared money contract."
+      }
+    ]
+  }
+}

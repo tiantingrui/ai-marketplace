@@ -1,0 +1,4 @@
+interface:
+  display_name: "Check Project Rules"
+  short_description: "Incremental repository-rule checks with deterministic evidence"
+  default_prompt: "Use $check-project-rules to check my current changes against this repository's rules."

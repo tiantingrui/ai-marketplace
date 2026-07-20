@@ -1,0 +1,23 @@
+{
+  "conclusion": "suggest-changes",
+  "findings": [
+    {
+      "title": "Native multiplication bypasses the repository's decimal contract",
+      "priority": "P1",
+      "file": "apps/mobile-web/app/order/page.tsx",
+      "line": 12,
+      "scenario": "An order price or quantity contains a decimal value",
+      "evidence": "const total = price * quantity",
+      "impact": "Displayed or submitted totals can contain floating-point error",
+      "suggestion": "Use DecimalMath.times and add decimal-boundary tests",
+      "confidence": "high"
+    }
+  ],
+  "testSuggestions": [
+    "Cover decimal boundaries such as 0.1 multiplied by 0.2",
+    "Regression-test the configured peer application's matching page"
+  ],
+  "questions": [
+    "Should the configured peer application receive the same calculation change?"
+  ]
+}

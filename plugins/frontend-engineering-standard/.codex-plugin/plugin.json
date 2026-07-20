@@ -1,0 +1,34 @@
+{
+  "name": "frontend-engineering-standard",
+  "version": "1.0.0+codex.20260720152635",
+  "description": "Configurable repository rule checks, change-impact analysis, and evidence-based pull-request review.",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "AI Marketplace Contributors"
+  },
+  "homepage": "https://github.com/tiantingrui/ai-marketplace",
+  "repository": "https://github.com/tiantingrui/ai-marketplace",
+  "keywords": [
+    "frontend",
+    "code-review",
+    "impact-analysis",
+    "repository-rules"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Frontend Engineering Standard",
+    "shortDescription": "Configurable rule checks, impact analysis, and PR review",
+    "longDescription": "A read-only engineering assistant that combines deterministic repository checks with evidence-based impact analysis and pull-request review. Project-specific conventions are supplied through repository instructions or an optional .ai-marketplace.json file.",
+    "developerName": "AI Marketplace Contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Analyze"
+    ],
+    "defaultPrompt": [
+      "Check my current changes against this repository's rules.",
+      "Analyze the applications, packages, risks, and tests affected by this change.",
+      "Review the current diff and report only evidence-backed issues."
+    ]
+  }
+}

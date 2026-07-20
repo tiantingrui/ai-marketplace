@@ -1,0 +1,20 @@
+{
+  "name": "ai-marketplace",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Public AI marketplace for configurable engineering workflows",
+  "scripts": {
+    "doctor": "node plugins/frontend-engineering-standard/scripts/marketplace-cli.mjs doctor && node scripts/validate-marketplace.mjs",
+    "validate:local": "node scripts/validate-marketplace.mjs",
+    "validate": "node scripts/validate-all.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "rules": "node plugins/frontend-engineering-standard/scripts/marketplace-cli.mjs rules",
+    "impact": "node plugins/frontend-engineering-standard/scripts/marketplace-cli.mjs impact",
+    "review-context": "node plugins/frontend-engineering-standard/scripts/marketplace-cli.mjs review-context"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
