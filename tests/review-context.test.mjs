@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -69,6 +70,23 @@ test("sensitive file contents never enter review context", (t) => {
   const context = buildReviewContext(repo);
   assert.ok(!context.diff.includes("super-secret-new-value"));
   assert.ok(!context.changedFiles.some((item) => item.file === ".env.production"));
+});
+
+test("untracked symbolic links never enter review context", (t) => {
+  const repo = createTestRepository(reviewWorkspace());
+  const externalDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-marketplace-external-"));
+  const externalFile = path.join(externalDirectory, "outside.ts");
+  t.after(() => {
+    removeTestRepository(repo);
+    fs.rmSync(externalDirectory, { recursive: true, force: true });
+  });
+
+  fs.writeFileSync(externalFile, "export const secret = 'must-not-leak';\n");
+  fs.symlinkSync(externalFile, path.join(repo, "linked-outside.ts"));
+
+  const context = buildReviewContext(repo);
+  assert.ok(!context.changedFiles.some((item) => item.file === "linked-outside.ts"));
+  assert.ok(!context.diff.includes("must-not-leak"));
 });
 
 test("whitespace-only source changes suppress missing-test noise", (t) => {

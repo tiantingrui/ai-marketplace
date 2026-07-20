@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { collectChangedFiles, collectChangedLines, describeRange, ensureGitRepository } from "./git-evidence.mjs";
+import {
+  collectChangedFiles,
+  collectChangedLines,
+  describeRange,
+  ensureGitRepository,
+  readRepositoryTextFile,
+} from "./git-evidence.mjs";
 import { loadProjectConfig } from "./project-config.mjs";
 
 function scopeForFile(file) {
@@ -24,7 +30,9 @@ function discoverWorkspace(repository) {
       const packageFile = path.join(root, entry.name, "package.json");
       if (!fs.existsSync(packageFile)) continue;
       try {
-        const manifest = JSON.parse(fs.readFileSync(packageFile, "utf8"));
+        const content = readRepositoryTextFile(repository, path.relative(repository, packageFile));
+        if (content === null) continue;
+        const manifest = JSON.parse(content);
         workspaces.push({ scope: `${group}/${entry.name}`, name: manifest.name, manifest });
       } catch {
         // The target repository should report malformed manifests through its own validation.

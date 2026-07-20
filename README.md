@@ -63,7 +63,7 @@ node <plugin-root>/scripts/marketplace-cli.mjs review-context --repo /path/to/re
 - 确定性规则可进入 CI；模型结论只能作为人工评审的辅助证据。
 - 没有仓库证据的推断必须降级为待确认问题。
 
-架构、使用、安全和贡献说明见 [`docs/`](docs/architecture.md) 与 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+架构、使用、安全、后续路线和贡献说明见 [`docs/`](docs/architecture.md)、[项目路线图](docs/roadmap.md)与 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 本地验证
 

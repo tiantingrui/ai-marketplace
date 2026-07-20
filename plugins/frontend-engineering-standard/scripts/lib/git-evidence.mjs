@@ -12,12 +12,45 @@ const GENERATED_PATH_PATTERNS = [
   /(^|\/)(?:node_modules|\.git|\.next|out|dist|build|coverage)(\/|$)/,
 ];
 
+const MAX_TEXT_FILE_BYTES = 1024 * 1024;
+
 export function isSensitivePath(file) {
   return SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(file));
 }
 
 export function isGeneratedPath(file) {
   return GENERATED_PATH_PATTERNS.some((pattern) => pattern.test(file));
+}
+
+function isInsideDirectory(directory, candidate) {
+  const relative = path.relative(directory, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+export function readRepositoryTextFile(repo, file, { maxBytes = MAX_TEXT_FILE_BYTES } = {}) {
+  const repositoryPath = path.resolve(repo);
+  const repository = fs.realpathSync(repositoryPath);
+  const absolute = path.resolve(repositoryPath, file);
+  if (!isInsideDirectory(repositoryPath, absolute)) return null;
+
+  let metadata;
+  try {
+    metadata = fs.lstatSync(absolute);
+  } catch {
+    return null;
+  }
+  if (!metadata.isFile() || metadata.size > maxBytes) return null;
+
+  let realFile;
+  try {
+    realFile = fs.realpathSync(absolute);
+  } catch {
+    return null;
+  }
+  if (!isInsideDirectory(repository, realFile)) return null;
+
+  const content = fs.readFileSync(realFile, "utf8");
+  return content.includes("\0") ? null : content;
 }
 
 export function runGit(repo, args, { allowFailure = false } = {}) {
@@ -67,6 +100,7 @@ export function collectChangedFiles(repo, options = {}) {
     const untracked = runGit(repo, ["ls-files", "--others", "--exclude-standard"]);
     for (const file of untracked.stdout.split("\n").filter(Boolean)) {
       if (isSensitivePath(file) || isGeneratedPath(file)) continue;
+      if (readRepositoryTextFile(repo, file) === null) continue;
       if (!files.some((item) => item.file === file)) files.push({ status: "A", file });
     }
   }
@@ -110,11 +144,8 @@ export function collectChangedLines(repo, options = {}) {
 
   for (const { status, file } of changedFiles) {
     if (status !== "A" || additions.some((item) => item.file === file)) continue;
-    const absolute = path.join(repo, file);
-    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) continue;
-    if (fs.statSync(absolute).size > 1024 * 1024) continue;
-    const content = fs.readFileSync(absolute, "utf8");
-    if (content.includes("\0")) continue;
+    const content = readRepositoryTextFile(repo, file);
+    if (content === null) continue;
     content.split("\n").forEach((text, index) => additions.push({ file, line: index + 1, text }));
   }
 
@@ -129,11 +160,8 @@ export function collectSafeDiff(repo, options = {}) {
     const result = runGit(repo, ["diff", "--no-color", "--unified=3", "--no-ext-diff", ...range, "--", file]);
     if (result.stdout.trim()) sections.push(result.stdout.trim());
     else {
-      const absolute = path.join(repo, file);
-      if (fs.existsSync(absolute) && fs.statSync(absolute).isFile() && fs.statSync(absolute).size <= 1024 * 1024) {
-        const content = fs.readFileSync(absolute, "utf8");
-        if (!content.includes("\0")) sections.push(`diff --git a/${file} b/${file}\nnew file mode\n+++ b/${file}\n${content}`);
-      }
+      const content = readRepositoryTextFile(repo, file);
+      if (content !== null) sections.push(`diff --git a/${file} b/${file}\nnew file mode\n+++ b/${file}\n${content}`);
     }
   }
   return sections.join("\n\n");
@@ -155,9 +183,8 @@ export function collectNonWhitespaceDiff(repo, options = {}) {
     ]);
     if (result.stdout.trim()) sections.push(result.stdout.trim());
     else if (item.status === "A") {
-      const absolute = path.join(repo, item.file);
-      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) continue;
-      const content = fs.readFileSync(absolute, "utf8");
+      const content = readRepositoryTextFile(repo, item.file);
+      if (content === null) continue;
       if (content.replace(/\s/g, "")) sections.push(`[NEW FILE] ${item.file}`);
     }
   }
