@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "1.0",
+  "families": [
+    {
+      "familyId": "css-units",
+      "category": "style",
+      "configPath": "rules.cssUnits",
+      "enabledByDefault": false,
+      "findingIdPolicy": {
+        "kind": "configurable",
+        "defaultBaseIds": [
+          "CSS001"
+        ],
+        "derivedSuffixes": [
+          "-EXCEPTION"
+        ]
+      },
+      "defaultFindingIds": [
+        "CSS001",
+        "CSS001-EXCEPTION"
+      ],
+      "defaultSeverities": {
+        "base": "error",
+        "exception": "warning"
+      },
+      "rationale": "Prevent unsupported CSS units from entering configured paths while keeping allowed-value exceptions visible.",
+      "scope": "Added or modified lines in CSS, SCSS, Less, JavaScript, JSX, TypeScript, and TSX files matched by pathPrefixes.",
+      "evidence": "The matched numeric value and unit from the changed line.",
+      "remediation": "Use replacementUnit and scale, or the repository's configured design token.",
+      "exemption": "allowedValues emit the derived -EXCEPTION finding at exceptionSeverity; they are reviewed rather than silently suppressed.",
+      "owner": "frontend-engineering-standard maintainers",
+      "since": "1.0.0",
+      "tests": [
+        "tests/rules.test.mjs"
+      ]
+    },
+    {
+      "familyId": "forbidden-imports",
+      "category": "dependency-boundary",
+      "configPath": "rules.forbiddenImports",
+      "enabledByDefault": false,
+      "findingIdPolicy": {
+        "kind": "configurable",
+        "defaultBaseIds": [
+          "IMPORT001"
+        ],
+        "derivedSuffixes": []
+      },
+      "defaultFindingIds": [
+        "IMPORT001"
+      ],
+      "defaultSeverities": {
+        "base": "error"
+      },
+      "rationale": "Enforce repository-configured import boundaries.",
+      "scope": "Added or modified JavaScript, JSX, TypeScript, and TSX import lines matched by pathPrefixes.",
+      "evidence": "The exact configured module source found on the changed line.",
+      "remediation": "Use the configured repository-approved wrapper or shared package.",
+      "exemption": "Remove the source from forbiddenImports or narrow pathPrefixes; no inline suppression is implemented.",
+      "owner": "frontend-engineering-standard maintainers",
+      "since": "1.0.0",
+      "tests": [
+        "tests/rules.test.mjs"
+      ]
+    },
+    {
+      "familyId": "precision-imports",
+      "category": "correctness",
+      "configPath": "rules.precisionImports",
+      "enabledByDefault": false,
+      "findingIdPolicy": {
+        "kind": "configurable",
+        "defaultBaseIds": [
+          "PRECISION001"
+        ],
+        "derivedSuffixes": []
+      },
+      "defaultFindingIds": [
+        "PRECISION001"
+      ],
+      "defaultSeverities": {
+        "base": "error"
+      },
+      "rationale": "Keep precision-sensitive calculations behind the repository-approved abstraction.",
+      "scope": "Added or modified JavaScript, JSX, TypeScript, and TSX import lines matched by pathPrefixes.",
+      "evidence": "The direct precision-library import source found on the changed line.",
+      "remediation": "Use preferredSymbol from preferredSource, or the repository-approved precision wrapper.",
+      "exemption": "Remove the source from precisionImports or narrow pathPrefixes; no inline suppression is implemented.",
+      "owner": "frontend-engineering-standard maintainers",
+      "since": "1.0.0",
+      "tests": [
+        "tests/rules.test.mjs"
+      ]
+    },
+    {
+      "familyId": "shared-utilities",
+      "category": "architecture",
+      "configPath": "rules.sharedUtilities",
+      "enabledByDefault": true,
+      "findingIdPolicy": {
+        "kind": "fixed",
+        "defaultBaseIds": [
+          "SHARED001"
+        ],
+        "derivedSuffixes": []
+      },
+      "defaultFindingIds": [
+        "SHARED001"
+      ],
+      "defaultSeverities": {
+        "base": "warning"
+      },
+      "rationale": "Surface newly added application-local utilities that may belong in a shared workspace package.",
+      "scope": "New .ts or .tsx files under apps/application/utils or apps/application/lib.",
+      "evidence": "The basename of the newly added utility file.",
+      "remediation": "Move generic logic to the configured target and import it through importSource.",
+      "exemption": "Disable rules.sharedUtilities.enabled, or retain the warning as reviewed when the utility is application-specific.",
+      "owner": "frontend-engineering-standard maintainers",
+      "since": "1.0.0",
+      "tests": [
+        "tests/rules.test.mjs"
+      ]
+    },
+    {
+      "familyId": "workspace-package-change-reminder",
+      "category": "change-impact",
+      "configPath": "rules.packageChangeReminder",
+      "enabledByDefault": true,
+      "findingIdPolicy": {
+        "kind": "fixed",
+        "defaultBaseIds": [
+          "WORKSPACE001"
+        ],
+        "derivedSuffixes": []
+      },
+      "defaultFindingIds": [
+        "WORKSPACE001"
+      ],
+      "defaultSeverities": {
+        "base": "info"
+      },
+      "rationale": "Remind maintainers to validate consumers when a shared workspace package changes.",
+      "scope": "Safe changed paths below packages/package-name, with one finding per changed package.",
+      "evidence": "The changed packages/package-name scope.",
+      "remediation": "Refresh workspace dependencies when required and validate all consuming applications.",
+      "exemption": "Set rules.packageChangeReminder to false; no per-package suppression is implemented.",
+      "owner": "frontend-engineering-standard maintainers",
+      "since": "1.0.0",
+      "tests": [
+        "tests/rules.test.mjs"
+      ]
+    }
+  ]
+}

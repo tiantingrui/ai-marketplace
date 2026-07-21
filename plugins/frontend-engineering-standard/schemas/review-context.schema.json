@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/review-context.schema.json",
+  "title": "Pull-request review context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capability",
+    "repository",
+    "range",
+    "requirement",
+    "changedFiles",
+    "deterministicRules",
+    "impact",
+    "reviewSignals",
+    "reviewContract",
+    "diff",
+    "diffTruncated"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "capability": {
+      "const": "pull-request-review-context"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "range": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "requirement": {
+      "type": "string"
+    },
+    "changedFiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/changedFile"
+      }
+    },
+    "deterministicRules": {
+      "$ref": "./rule-report.schema.json"
+    },
+    "impact": {
+      "$ref": "./impact-report.schema.json"
+    },
+    "reviewSignals": {
+      "$ref": "#/$defs/reviewSignals"
+    },
+    "reviewContract": {
+      "$ref": "#/$defs/reviewContract"
+    },
+    "diff": {
+      "type": "string"
+    },
+    "diffTruncated": {
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "changedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "file"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "pattern": "^[A-Z]$"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      }
+    },
+    "reviewSignals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceFilesChanged",
+        "testFilesChanged",
+        "missingTestChanges",
+        "whitespaceOnly",
+        "peerFilesNotChanged",
+        "highRiskDomains",
+        "deterministicErrors"
+      ],
+      "properties": {
+        "sourceFilesChanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "testFilesChanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missingTestChanges": {
+          "type": "boolean"
+        },
+        "whitespaceOnly": {
+          "type": "boolean"
+        },
+        "peerFilesNotChanged": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "./impact-report.schema.json#/$defs/pairedFile"
+              },
+              {
+                "required": [
+                  "counterpartChanged"
+                ],
+                "properties": {
+                  "counterpartChanged": {
+                    "const": false
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "highRiskDomains": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "./impact-report.schema.json#/$defs/riskDomain"
+              },
+              {
+                "required": [
+                  "severity"
+                ],
+                "properties": {
+                  "severity": {
+                    "const": "high"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "deterministicErrors": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "reviewContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxFindings",
+        "priorities",
+        "confidence",
+        "requiredFindingFields",
+        "conclusions",
+        "principles"
+      ],
+      "properties": {
+        "maxFindings": {
+          "const": 8
+        },
+        "priorities": {
+          "const": [
+            "P0",
+            "P1",
+            "P2",
+            "P3"
+          ]
+        },
+        "confidence": {
+          "const": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "requiredFindingFields": {
+          "const": [
+            "title",
+            "priority",
+            "file",
+            "line",
+            "scenario",
+            "evidence",
+            "impact",
+            "suggestion",
+            "confidence"
+          ]
+        },
+        "conclusions": {
+          "const": [
+            "pass",
+            "suggest-changes",
+            "do-not-merge"
+          ]
+        },
+        "principles": {
+          "const": [
+            "Do not repeat issues already reported by deterministic checks",
+            "Review only risks introduced or activated by the current change",
+            "Move unsupported risks to questions",
+            "Model review is never the sole merge authority"
+          ]
+        }
+      }
+    }
+  }
+}

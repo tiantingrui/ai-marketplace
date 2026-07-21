@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/rule-registry.schema.json",
+  "title": "Frontend engineering standard rule registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "families"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/family"
+      }
+    }
+  },
+  "$defs": {
+    "family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "familyId",
+        "category",
+        "configPath",
+        "enabledByDefault",
+        "findingIdPolicy",
+        "defaultFindingIds",
+        "defaultSeverities",
+        "rationale",
+        "scope",
+        "evidence",
+        "remediation",
+        "exemption",
+        "owner",
+        "since",
+        "tests"
+      ],
+      "properties": {
+        "familyId": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "configPath": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "enabledByDefault": {
+          "type": "boolean"
+        },
+        "findingIdPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "defaultBaseIds",
+            "derivedSuffixes"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "fixed",
+                "configurable"
+              ]
+            },
+            "defaultBaseIds": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            },
+            "derivedSuffixes": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "defaultFindingIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "defaultSeverities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "base"
+          ],
+          "properties": {
+            "base": {
+              "enum": [
+                "error",
+                "warning",
+                "info"
+              ]
+            },
+            "exception": {
+              "enum": [
+                "error",
+                "warning",
+                "info"
+              ]
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "remediation": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "exemption": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "since": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "tests": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+          }
+        }
+      }
+    }
+  }
+}

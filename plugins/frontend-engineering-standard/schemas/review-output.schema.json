@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/review-output.schema.json",
+  "title": "Semantic pull-request review output",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "conclusion",
+    "findings",
+    "testSuggestions",
+    "questions"
+  ],
+  "properties": {
+    "conclusion": {
+      "enum": [
+        "pass",
+        "suggest-changes",
+        "do-not-merge"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "testSuggestions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "title",
+        "priority",
+        "file",
+        "line",
+        "scenario",
+        "evidence",
+        "impact",
+        "suggestion",
+        "confidence"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "priority": {
+          "enum": [
+            "P0",
+            "P1",
+            "P2",
+            "P3"
+          ]
+        },
+        "file": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scenario": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "impact": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "suggestion": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      }
+    }
+  }
+}

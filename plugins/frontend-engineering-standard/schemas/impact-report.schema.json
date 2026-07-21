@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/impact-report.schema.json",
+  "title": "Change impact report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capability",
+    "repository",
+    "range",
+    "requirement",
+    "configuration",
+    "riskLevel",
+    "directImpacts",
+    "potentialImpacts",
+    "sharedPackages",
+    "pairedFiles",
+    "riskDomains",
+    "implementationOrder",
+    "testMatrix",
+    "questions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "capability": {
+      "const": "change-impact"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "range": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "requirement": {
+      "type": "string"
+    },
+    "configuration": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "loaded",
+            "file"
+          ],
+          "properties": {
+            "loaded": {
+              "const": true
+            },
+            "file": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "loaded",
+            "file"
+          ],
+          "properties": {
+            "loaded": {
+              "const": false
+            },
+            "file": {
+              "const": null
+            }
+          }
+        }
+      ]
+    },
+    "riskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "medium-high",
+        "high"
+      ]
+    },
+    "directImpacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "potentialImpacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "sharedPackages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sharedPackage"
+      }
+    },
+    "pairedFiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pairedFile"
+      }
+    },
+    "riskDomains": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/riskDomain"
+      }
+    },
+    "implementationOrder": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      }
+    },
+    "testMatrix": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      }
+    }
+  },
+  "$defs": {
+    "impactItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "reason",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium"
+          ]
+        }
+      }
+    },
+    "sharedPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "packageName",
+        "consumers"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "packageName": {
+          "type": "string",
+          "description": "May be an empty string when the current runtime reads a workspace manifest with an empty name."
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "pairedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group",
+        "changed",
+        "counterpart",
+        "counterpartChanged"
+      ],
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "changed": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "counterpart": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "counterpartChanged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "riskDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "severity",
+        "keywords",
+        "tests"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "label": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "medium-high",
+            "high"
+          ]
+        },
+        "keywords": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "tests": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  }
+}

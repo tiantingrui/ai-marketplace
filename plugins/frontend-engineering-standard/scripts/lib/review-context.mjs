@@ -8,19 +8,19 @@ import {
 } from "./git-evidence.mjs";
 import { checkProjectRules } from "./rule-checker.mjs";
 
-const REVIEW_CONTRACT = {
+const REVIEW_CONTRACT = Object.freeze({
   maxFindings: 8,
-  priorities: ["P0", "P1", "P2", "P3"],
-  confidence: ["high", "medium", "low"],
-  requiredFindingFields: ["title", "priority", "file", "line", "scenario", "evidence", "impact", "suggestion", "confidence"],
-  conclusions: ["pass", "suggest-changes", "do-not-merge"],
-  principles: [
+  priorities: Object.freeze(["P0", "P1", "P2", "P3"]),
+  confidence: Object.freeze(["high", "medium", "low"]),
+  requiredFindingFields: Object.freeze(["title", "priority", "file", "line", "scenario", "evidence", "impact", "suggestion", "confidence"]),
+  conclusions: Object.freeze(["pass", "suggest-changes", "do-not-merge"]),
+  principles: Object.freeze([
     "Do not repeat issues already reported by deterministic checks",
     "Review only risks introduced or activated by the current change",
     "Move unsupported risks to questions",
     "Model review is never the sole merge authority",
-  ],
-};
+  ]),
+});
 
 function isSourceFile(file) {
   return /\.(?:js|jsx|ts|tsx|css|scss|less)$/.test(file) && !/(?:\.test|\.spec)\.[^.]+$/.test(file);
@@ -77,16 +77,28 @@ export function validateReviewOutput(output) {
   else {
     if (output.findings.length > REVIEW_CONTRACT.maxFindings) errors.push(`findings must contain at most ${REVIEW_CONTRACT.maxFindings} items`);
     output.findings.forEach((item, index) => {
-      for (const field of REVIEW_CONTRACT.requiredFindingFields) {
-        if (item[field] === undefined || item[field] === "") errors.push(`findings[${index}].${field} is missing`);
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        errors.push(`findings[${index}] must be an object`);
+        return;
       }
-      if (!REVIEW_CONTRACT.priorities.includes(item.priority)) errors.push(`findings[${index}].priority is invalid`);
-      if (!REVIEW_CONTRACT.confidence.includes(item.confidence)) errors.push(`findings[${index}].confidence is invalid`);
+      for (const field of REVIEW_CONTRACT.requiredFindingFields.filter((name) => name !== "line")) {
+        if (typeof item[field] !== "string" || item[field].trim() === "") {
+          errors.push(`findings[${index}].${field} must be a non-empty string`);
+        }
+      }
+      if (typeof item.priority === "string" && item.priority.trim() !== ""
+        && !REVIEW_CONTRACT.priorities.includes(item.priority)) errors.push(`findings[${index}].priority is invalid`);
+      if (typeof item.confidence === "string" && item.confidence.trim() !== ""
+        && !REVIEW_CONTRACT.confidence.includes(item.confidence)) errors.push(`findings[${index}].confidence is invalid`);
       if (!Number.isInteger(item.line) || item.line < 1) errors.push(`findings[${index}].line must be a positive integer`);
     });
   }
-  if (!Array.isArray(output.testSuggestions)) errors.push("testSuggestions must be an array");
-  if (!Array.isArray(output.questions)) errors.push("questions must be an array");
+  for (const field of ["testSuggestions", "questions"]) {
+    if (!Array.isArray(output[field])) errors.push(`${field} must be an array`);
+    else output[field].forEach((item, index) => {
+      if (typeof item !== "string") errors.push(`${field}[${index}] must be a string`);
+    });
+  }
   return errors;
 }
 

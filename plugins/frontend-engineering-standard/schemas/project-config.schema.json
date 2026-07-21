@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/project-config.schema.json",
+  "title": "Frontend engineering standard project configuration",
+  "description": "The optional, repository-local .ai-marketplace.json input before built-in defaults are applied.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cssUnits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "pathPrefixes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/repositoryPath"
+                }
+              },
+              "unit": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "replacementUnit": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "scale": {
+                "type": "number",
+                "not": {
+                  "const": 0
+                }
+              },
+              "allowedValues": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ]
+              },
+              "exceptionSeverity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "suggestion": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "exceptionMessage": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "exceptionSuggestion": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "forbiddenImports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sources"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "pathPrefixes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/repositoryPath"
+                }
+              },
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "suggestion": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "precisionImports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sources"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "pathPrefixes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/repositoryPath"
+                }
+              },
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "suggestion": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "preferredSymbol": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "preferredSource": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "sharedUtilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "target": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "importSource": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        },
+        "packageChangeReminder": {
+          "type": "boolean"
+        }
+      }
+    },
+    "impact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pairedApplications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scopes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "scopes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/repositoryPath"
+                }
+              }
+            }
+          }
+        },
+        "riskDomains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "severity",
+              "keywords",
+              "tests"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "label": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "severity": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "medium-high",
+                  "high"
+                ]
+              },
+              "keywords": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              },
+              "tests": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              }
+            }
+          }
+        },
+        "riskRecommendations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "riskDomain",
+              "scopes"
+            ],
+            "properties": {
+              "riskDomain": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "scopes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/repositoryPath"
+                }
+              },
+              "reason": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?=.*\\S)(?![\\\\/])(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$"
+    }
+  }
+}
