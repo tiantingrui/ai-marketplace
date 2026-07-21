@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -14,6 +16,24 @@ import {
   writeFiles,
 } from "./test-repository.mjs";
 
+const GIT_COUNTER_LOG_ENV = "AI_MARKETPLACE_TEST_GIT_COUNTER_LOG";
+const GIT_COUNTER_REAL_GIT_ENV = "AI_MARKETPLACE_TEST_REAL_GIT";
+
+function findExecutableOnPath(name) {
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return fs.realpathSync(candidate);
+    } catch {
+      // Keep searching PATH for an executable candidate.
+    }
+  }
+  throw new Error(`Unable to find ${name} on PATH`);
+}
+
+const REAL_GIT = findExecutableOnPath("git");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(ROOT, "plugins/frontend-engineering-standard/scripts/marketplace-cli.mjs");
 const CONFIG = JSON.stringify({
@@ -51,10 +71,86 @@ function keys(value) {
   return Object.keys(value).sort();
 }
 
+function restoreEnvironmentVariable(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+function installGitCounter(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-marketplace-git-counter-"));
+  const logFile = path.join(directory, "git-calls.jsonl");
+  const wrapper = path.join(directory, "git");
+  const previousPath = process.env.PATH;
+  const previousLogFile = process.env[GIT_COUNTER_LOG_ENV];
+  const previousRealGit = process.env[GIT_COUNTER_REAL_GIT_ENV];
+
+  fs.writeFileSync(wrapper, [
+    "#!/usr/bin/env node",
+    'const fs = require("node:fs");',
+    'const { spawnSync } = require("node:child_process");',
+    `const logFile = process.env[${JSON.stringify(GIT_COUNTER_LOG_ENV)}];`,
+    `const realGit = process.env[${JSON.stringify(GIT_COUNTER_REAL_GIT_ENV)}];`,
+    "const args = process.argv.slice(2);",
+    "fs.appendFileSync(logFile, `${JSON.stringify(args)}\\n`);",
+    'const result = spawnSync(realGit, args, { stdio: "inherit" });',
+    "if (result.error) {",
+    "  console.error(result.error.message);",
+    "  process.exit(1);",
+    "}",
+    "process.exit(result.status ?? 1);",
+    "",
+  ].join("\n"));
+  fs.chmodSync(wrapper, 0o755);
+
+  process.env[GIT_COUNTER_LOG_ENV] = logFile;
+  process.env[GIT_COUNTER_REAL_GIT_ENV] = REAL_GIT;
+  process.env.PATH = `${directory}${path.delimiter}${previousPath ?? ""}`;
+
+  t.after(() => {
+    restoreEnvironmentVariable("PATH", previousPath);
+    restoreEnvironmentVariable(GIT_COUNTER_LOG_ENV, previousLogFile);
+    restoreEnvironmentVariable(GIT_COUNTER_REAL_GIT_ENV, previousRealGit);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  return () => {
+    if (!fs.existsSync(logFile)) return [];
+    return fs.readFileSync(logFile, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  };
+}
+
 test("test repositories always use the main branch", (t) => {
   const repo = createTestRepository({ "package.json": "{}\n" });
   t.after(() => removeTestRepository(repo));
   assert.equal(git(repo, ["symbolic-ref", "--short", "HEAD"]), "main");
+});
+
+test("one review report resolves one comparison context", (t) => {
+  const repo = createTestRepository(repositoryFiles());
+  t.after(() => removeTestRepository(repo));
+  writeFiles(repo, {
+    "apps/web/src/page.tsx": [
+      'import { Button } from "legacy-ui";',
+      'export const Page = () => <main className="w-[16px]" />;',
+      "",
+    ].join("\n"),
+  });
+  const readGitCalls = installGitCounter(t);
+
+  const report = buildReviewContext(repo, { base: "HEAD", requirement: "Update the UI page" });
+
+  assert.equal(report.reviewSignals.deterministicErrors, 2);
+  const guardedRevParses = readGitCalls()
+    .filter((args) => args[0] === "rev-parse" && args.includes("--end-of-options"));
+  assert.equal(guardedRevParses.length, 2);
+  assert.equal(guardedRevParses.filter((args) => args.at(-1) === "HEAD^{commit}").length, 1);
+  assert.equal(
+    guardedRevParses.filter((args) => args.at(-1) === "refs/heads/__git_evidence_missing__^{commit}").length,
+    1,
+  );
 });
 
 test("report fields stay stable across working-tree, base-only, and base-head modes", (t) => {

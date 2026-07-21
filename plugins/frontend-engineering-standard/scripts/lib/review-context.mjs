@@ -3,6 +3,7 @@ import {
   collectChangedFiles,
   collectNonWhitespaceDiff,
   collectSafeDiff,
+  createComparisonContext,
   describeRange,
   ensureGitRepository,
 } from "./git-evidence.mjs";
@@ -32,25 +33,26 @@ function isTestFile(file) {
 
 export function buildReviewContext(repo, options = {}) {
   const repository = ensureGitRepository(repo);
-  const changedFiles = collectChangedFiles(repository, options);
-  const rules = checkProjectRules(repository, options);
-  const impact = analyzeChangeImpact(repository, options);
-  const rawDiff = collectSafeDiff(repository, options);
-  const maxDiffCharacters = Number(options.maxDiffCharacters ?? 120_000);
+  const comparisonOptions = createComparisonContext(repository, options);
+  const changedFiles = collectChangedFiles(repository, comparisonOptions);
+  const rules = checkProjectRules(repository, comparisonOptions);
+  const impact = analyzeChangeImpact(repository, comparisonOptions);
+  const rawDiff = collectSafeDiff(repository, comparisonOptions);
+  const maxDiffCharacters = Number(comparisonOptions.maxDiffCharacters ?? 120_000);
   const diffTruncated = rawDiff.length > maxDiffCharacters;
   const diff = diffTruncated ? `${rawDiff.slice(0, maxDiffCharacters)}\n\n[DIFF TRUNCATED]` : rawDiff;
   const sourceFiles = changedFiles.filter((item) => isSourceFile(item.file));
   const testFiles = changedFiles.filter((item) => isTestFile(item.file));
   const peerFilesNotChanged = impact.pairedFiles.filter((item) => !item.counterpartChanged);
-  const nonWhitespaceDiff = collectNonWhitespaceDiff(repository, options);
+  const nonWhitespaceDiff = collectNonWhitespaceDiff(repository, comparisonOptions);
   const whitespaceOnly = sourceFiles.length > 0 && nonWhitespaceDiff.trim() === "";
 
   return {
     schemaVersion: "1.0",
     capability: "pull-request-review-context",
     repository,
-    range: describeRange(options),
-    requirement: options.requirement?.trim() ?? "",
+    range: describeRange(comparisonOptions),
+    requirement: comparisonOptions.requirement?.trim() ?? "",
     changedFiles,
     deterministicRules: rules,
     impact,

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   collectChangedFiles,
   collectChangedLines,
+  createComparisonContext,
   describeRange,
   ensureGitRepository,
   readRepositoryTextFile,
@@ -109,11 +110,12 @@ function collectPairedFiles(repository, changedFiles, pairedApplications, potent
 
 export function analyzeChangeImpact(repo, options = {}) {
   const repository = ensureGitRepository(repo);
+  const comparisonOptions = createComparisonContext(repository, options);
   const configuration = loadProjectConfig(repository);
   const config = configuration.config;
-  const requirement = options.requirement?.trim() ?? "";
-  const changedFiles = collectChangedFiles(repository, options);
-  const additions = collectChangedLines(repository, options);
+  const requirement = comparisonOptions.requirement?.trim() ?? "";
+  const changedFiles = collectChangedFiles(repository, comparisonOptions);
+  const additions = collectChangedLines(repository, comparisonOptions);
   const directImpacts = [];
   const potentialImpacts = [];
   const questions = [];
@@ -186,7 +188,7 @@ export function analyzeChangeImpact(repo, options = {}) {
     schemaVersion: "1.0",
     capability: "change-impact",
     repository,
-    range: describeRange(options),
+    range: describeRange(comparisonOptions),
     requirement,
     configuration: {
       loaded: configuration.loaded,

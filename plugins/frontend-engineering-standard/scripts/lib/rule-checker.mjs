@@ -1,5 +1,11 @@
 import path from "node:path";
-import { collectChangedFiles, collectChangedLines, describeRange, ensureGitRepository } from "./git-evidence.mjs";
+import {
+  collectChangedFiles,
+  collectChangedLines,
+  createComparisonContext,
+  describeRange,
+  ensureGitRepository,
+} from "./git-evidence.mjs";
 import { findImportSource, loadProjectConfig, matchesPathPrefixes } from "./project-config.mjs";
 
 const TEXT_FILE = /\.(?:css|scss|less|js|jsx|ts|tsx)$/i;
@@ -101,10 +107,11 @@ function scanImports(item, config, findings) {
 
 export function checkProjectRules(repo, options = {}) {
   const repository = ensureGitRepository(repo);
+  const comparisonOptions = createComparisonContext(repository, options);
   const configuration = loadProjectConfig(repository);
   const config = configuration.config;
-  const changedFiles = collectChangedFiles(repository, options);
-  const additions = collectChangedLines(repository, options);
+  const changedFiles = collectChangedFiles(repository, comparisonOptions);
+  const additions = collectChangedLines(repository, comparisonOptions);
   const findings = [];
 
   for (const item of additions) {
@@ -164,7 +171,7 @@ export function checkProjectRules(repo, options = {}) {
     schemaVersion: "1.0",
     capability: "project-rules",
     repository,
-    range: describeRange(options),
+    range: describeRange(comparisonOptions),
     configuration: {
       loaded: configuration.loaded,
       file: configuration.file,
