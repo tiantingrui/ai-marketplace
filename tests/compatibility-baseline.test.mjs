@@ -54,7 +54,7 @@ function keys(value) {
 test("test repositories always use the main branch", (t) => {
   const repo = createTestRepository({ "package.json": "{}\n" });
   t.after(() => removeTestRepository(repo));
-  assert.equal(git(repo, ["branch", "--show-current"]), "main");
+  assert.equal(git(repo, ["symbolic-ref", "--short", "HEAD"]), "main");
 });
 
 test("report fields stay stable across working-tree, base-only, and base-head modes", (t) => {
@@ -116,24 +116,68 @@ test("report fields stay stable across working-tree, base-only, and base-head mo
   assert.equal(review.reviewSignals.missingTestChanges, true);
 
   const head = commitFiles(repo, {}, "change page");
+  writeFiles(repo, {
+    "apps/admin/src/working-only.ts": "export const workingOnly = true;\n",
+  });
 
-  for (const [options, expectedRange] of [
-    [{ base }, `${base}..working-tree`],
-    [{ base, head }, `${base}..${head}`],
-  ]) {
-    const modeRules = checkProjectRules(repo, options);
-    assert.equal(modeRules.range, expectedRange);
-    assert.deepEqual(modeRules.findings.map((item) => item.ruleId), ["IMPORT001", "CSS001"]);
+  const workingTreeRules = checkProjectRules(repo);
+  assert.equal(workingTreeRules.range, "HEAD..working-tree");
+  assert.equal(workingTreeRules.summary.changedFiles, 1);
+  assert.deepEqual(workingTreeRules.findings, []);
 
-    const modeImpact = analyzeChangeImpact(repo, { ...options, requirement: "Update the UI page" });
-    assert.equal(modeImpact.range, expectedRange);
-    assert.ok(modeImpact.directImpacts.some((item) => item.scope === "apps/web"));
+  const workingTreeImpact = analyzeChangeImpact(repo);
+  assert.equal(workingTreeImpact.range, "HEAD..working-tree");
+  assert.deepEqual(
+    workingTreeImpact.directImpacts.map(({ scope, evidence }) => ({ scope, evidence })),
+    [{ scope: "apps/admin", evidence: ["apps/admin/src/working-only.ts"] }],
+  );
 
-    const modeReview = buildReviewContext(repo, { ...options, requirement: "Update the UI page" });
-    assert.equal(modeReview.range, expectedRange);
-    assert.equal(modeReview.reviewSignals.deterministicErrors, 2);
-    assert.deepEqual(modeReview.changedFiles, [{ status: "M", file: "apps/web/src/page.tsx" }]);
-  }
+  const workingTreeReview = buildReviewContext(repo);
+  assert.equal(workingTreeReview.range, "HEAD..working-tree");
+  assert.equal(workingTreeReview.reviewSignals.deterministicErrors, 0);
+  assert.deepEqual(workingTreeReview.changedFiles, [
+    { status: "A", file: "apps/admin/src/working-only.ts" },
+  ]);
+
+  const baseOnlyRules = checkProjectRules(repo, { base });
+  assert.equal(baseOnlyRules.range, `${base}..working-tree`);
+  assert.equal(baseOnlyRules.summary.changedFiles, 2);
+  assert.deepEqual(baseOnlyRules.findings.map((item) => item.ruleId), ["IMPORT001", "CSS001"]);
+
+  const baseOnlyImpact = analyzeChangeImpact(repo, { base, requirement: "Update the UI page" });
+  assert.equal(baseOnlyImpact.range, `${base}..working-tree`);
+  assert.deepEqual(
+    baseOnlyImpact.directImpacts.map(({ scope, evidence }) => ({ scope, evidence })),
+    [
+      { scope: "apps/admin", evidence: ["apps/admin/src/working-only.ts"] },
+      { scope: "apps/web", evidence: ["apps/web/src/page.tsx"] },
+    ],
+  );
+
+  const baseOnlyReview = buildReviewContext(repo, { base, requirement: "Update the UI page" });
+  assert.equal(baseOnlyReview.range, `${base}..working-tree`);
+  assert.equal(baseOnlyReview.reviewSignals.deterministicErrors, 2);
+  assert.deepEqual(baseOnlyReview.changedFiles, [
+    { status: "A", file: "apps/admin/src/working-only.ts" },
+    { status: "M", file: "apps/web/src/page.tsx" },
+  ]);
+
+  const baseHeadRules = checkProjectRules(repo, { base, head });
+  assert.equal(baseHeadRules.range, `${base}..${head}`);
+  assert.equal(baseHeadRules.summary.changedFiles, 1);
+  assert.deepEqual(baseHeadRules.findings.map((item) => item.ruleId), ["IMPORT001", "CSS001"]);
+
+  const baseHeadImpact = analyzeChangeImpact(repo, { base, head, requirement: "Update the UI page" });
+  assert.equal(baseHeadImpact.range, `${base}..${head}`);
+  assert.deepEqual(
+    baseHeadImpact.directImpacts.map(({ scope, evidence }) => ({ scope, evidence })),
+    [{ scope: "apps/web", evidence: ["apps/web/src/page.tsx"] }],
+  );
+
+  const baseHeadReview = buildReviewContext(repo, { base, head, requirement: "Update the UI page" });
+  assert.equal(baseHeadReview.range, `${base}..${head}`);
+  assert.equal(baseHeadReview.reviewSignals.deterministicErrors, 2);
+  assert.deepEqual(baseHeadReview.changedFiles, [{ status: "M", file: "apps/web/src/page.tsx" }]);
 });
 
 test("built-in defaults remain stable without a project configuration", (t) => {
@@ -151,13 +195,52 @@ test("built-in defaults remain stable without a project configuration", (t) => {
     { errors: report.summary.errors, warnings: report.summary.warnings, info: report.summary.info },
     { errors: 0, warnings: 0, info: 0 },
   );
+
+  writeFiles(repo, {
+    "apps/web/utils/format.ts": "export const format = (value) => value;\n",
+    "packages/shared-utils/src/index.ts": "export const shared = true;\n",
+  });
+  const defaultRules = checkProjectRules(repo);
+  assert.deepEqual(
+    defaultRules.findings.map(({ ruleId, severity, file, line, confidence }) => ({
+      ruleId, severity, file, line, confidence,
+    })),
+    [
+      {
+        ruleId: "SHARED001",
+        severity: "warning",
+        file: "apps/web/utils/format.ts",
+        line: 1,
+        confidence: "medium",
+      },
+      {
+        ruleId: "WORKSPACE001",
+        severity: "info",
+        file: "packages/shared-utils",
+        line: 1,
+        confidence: "high",
+      },
+    ],
+  );
+  assert.deepEqual(
+    { errors: defaultRules.summary.errors, warnings: defaultRules.summary.warnings, info: defaultRules.summary.info },
+    { errors: 0, warnings: 1, info: 1 },
+  );
+
+  const impact = analyzeChangeImpact(repo, { requirement: "Update payment amount handling" });
+  assert.equal(impact.configuration.loaded, false);
+  assert.deepEqual(impact.riskDomains.map((item) => item.id), ["financial"]);
+  assert.equal(impact.riskLevel, "high");
 });
 
 test("CLI exit codes remain 0/1/2 across all analysis commands", (t) => {
   const repo = createTestRepository(repositoryFiles());
   t.after(() => removeTestRepository(repo));
 
-  const run = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
+  const run = (args) => spawnSync(process.execPath, [CLI, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C", LANG: "C" },
+  });
   const pass = run(["rules", "--repo", repo, "--format", "json"]);
   assert.equal(pass.status, 0);
   assert.equal(JSON.parse(pass.stdout).summary.errors, 0);
