@@ -56,6 +56,8 @@ node <plugin-root>/scripts/marketplace-cli.mjs review-context --repo /path/to/re
 
 字段说明见[项目配置](docs/configuration.md)。
 
+机器可读配置契约见插件内的 <a href="plugins/frontend-engineering-standard/schemas/project-config.schema.json"><code>project-config.schema.json</code></a>。
+
 ## 设计边界
 
 - 默认只读，不修改目标仓库、不发评论、不批准或合并 PR。

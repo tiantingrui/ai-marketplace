@@ -4,10 +4,11 @@
 
 1. 先写验收条件或失败测试。
 2. 修改 Skill、配置模型或插件内脚本。
-3. 运行 `npm run validate`。
-4. 使用脱敏的隔离仓库进行前向验证。
-5. 更新基础版本、CHANGELOG 和用户文档。
-6. 使用 Plugin Creator 刷新插件 cachebuster，并重新验证安装产物。
+3. 配置或输出契约变化时同步更新对应 Schema 与兼容基线；规则族变化时同步更新 `rules/registry.json` 及相关测试。
+4. 运行 `npm run validate`。
+5. 使用脱敏的隔离仓库进行前向验证。
+6. 更新 CHANGELOG、路线图和用户文档。
+7. 使用 Plugin Creator 刷新插件 cachebuster，并在隔离 `CODEX_HOME` 中重新验证安装产物。
 
 ## 版本策略
 

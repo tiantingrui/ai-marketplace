@@ -33,3 +33,15 @@ Marketplace 只提供通用引擎。应用名、共享包、框架封装、同�
 - 无法从仓库证明的产品或 API 契约由使用者确认。
 
 这样可以避免公共插件复制一份会过期的组织内部知识。
+
+## Marketplace 动态发现
+
+根校验器从 `.agents/plugins/marketplace.json` 遍历本仓库的本地插件条目，再分别执行 Marketplace topology、通用 plugin bundle、插件专属门禁和仓库发布门禁。通用层允许插件不声明 Skill；`frontend-engineering-standard` 专属层仍要求完整运行时、非空 Skill 集和 UI 元数据。
+
+所有插件目录、manifest、能力目录和契约引用均拒绝符号链接，并在 `realpath` 后确认没有越出对应信任根。
+
+## 机器契约与规则注册表
+
+`frontend-engineering-standard` 将配置、规则报告、影响报告、评审上下文、评审输出和规则注册表 Schema 打包在 `schemas/`。这些文件是经过项目结构检查的 Draft 2020-12 描述性契约；当前版本不宣称经过第三方标准执行器验证。
+
+内置确定性规则族登记在 `rules/registry.json`。注册表中的 `familyId` 用于规则治理，不等同于目标仓库配置产生的 `ruleId`。

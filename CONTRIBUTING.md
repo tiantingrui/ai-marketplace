@@ -25,6 +25,8 @@
 - 插件清单：`plugins/frontend-engineering-standard/.codex-plugin/plugin.json`
 - Skill 工作流：`plugins/frontend-engineering-standard/skills/`
 - 确定性引擎：`plugins/frontend-engineering-standard/scripts/`
+- 机器契约：`plugins/frontend-engineering-standard/schemas/`
+- 规则注册表：`plugins/frontend-engineering-standard/rules/registry.json`
 - 自动测试：`tests/`
 - 黄金与前向评测：`evals/`
 - 用户文档：`docs/`

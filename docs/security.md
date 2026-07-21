@@ -4,6 +4,12 @@
 
 执行引擎只收集完成当前分析所需的 Git 路径、变更行、workspace 清单和安全 diff。敏感路径在进入规则、影响和评审上下文前统一过滤。
 
+内容级 Git diff 只接收已经过滤的安全 pathspec，并禁用 external diff 与 textconv。命中敏感路径规则的文件在内容进入 Git stdout 或 Node.js 缓冲区之前即被排除，而不是只从最终报告中删除。
+
+除现有环境文件、密钥、证书和凭据路径外，默认还跳过 `.npmrc`、`.yarnrc`、`.yarnrc.yml`、`.pypirc`、`.netrc`、`_netrc`、`.ssh/`、`.aws/`、`.azure/`、`.kube/`、`.docker/config.json`、`.config/gcloud/` 和 `.config/gh/hosts.yml`。
+
+Marketplace 自身的插件目录、manifest、Skill、UI 元数据、Schema 和注册表引用同样执行 `lstat`、符号链接拒绝及 `realpath` 范围检查。
+
 默认跳过：
 
 - `.env` 及其变体。
@@ -11,7 +17,7 @@
 - 名称包含 credentials 或 secret 的常见凭据路径。
 - `.git`、依赖目录、构建输出和覆盖率产物。
 
-单个配置或新增文本文件超过一 MiB 时不会作为普通分析输入。
+单个配置或未跟踪新增文本文件超过一 MiB 时不会作为普通分析输入。
 
 读取未跟踪文件前会确认它是仓库内的常规文本文件。符号链接、仓库外真实路径、二进制文件和超过上限的文件不会进入规则、影响或评审上下文。`.ai-marketplace.json` 同样不允许通过符号链接加载。
 
