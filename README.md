@@ -13,7 +13,7 @@
 稳定版本固定到 Git Tag：
 
 ```bash
-codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref v1.0.0
+codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref v1.0.1
 codex plugin add frontend-engineering-standard@ai-marketplace
 ```
 

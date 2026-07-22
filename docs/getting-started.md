@@ -5,7 +5,7 @@
 需要已安装支持插件 Marketplace 的 Codex。添加固定版本并安装插件：
 
 ```bash
-codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref v1.0.0
+codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref v1.0.1
 codex plugin add frontend-engineering-standard@ai-marketplace
 ```
 
