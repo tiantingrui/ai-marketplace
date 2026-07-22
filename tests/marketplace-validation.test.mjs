@@ -733,6 +733,120 @@ test("repository release rejects conflicting refs in stable documentation", (t) 
   ]);
 });
 
+test("repository release ignores Marketplace add commands hidden in HTML comments", async (t) => {
+  await t.test("README multiline comment does not satisfy the current ref", (t) => {
+    const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+    writeText(path.join(fixture.root, "README.md"), [
+      "# AI Marketplace",
+      "",
+      "<!--",
+      "codex plugin marketplace add https://example.invalid/hidden.git --ref v1.0.1",
+      "-->",
+      "codex plugin add frontend-engineering-standard@ai-marketplace",
+      "",
+      "https://github.com/tiantingrui/ai-marketplace",
+      "Apache License 2.0",
+      "",
+    ].join("\n"));
+    writeText(
+      path.join(fixture.root, "docs/getting-started.md"),
+      "# Getting started\n\ncodex plugin marketplace add https://example.invalid/current.git --ref v1.0.1\n",
+    );
+    writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+    const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+    assert.deepEqual(result.errors, ["README: stable installation must pin v1.0.1"]);
+  });
+
+  await t.test("getting-started same-line comment does not satisfy the current ref", (t) => {
+    const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+    writeText(
+      path.join(fixture.root, "docs/getting-started.md"),
+      "# Getting started\n\n<!-- codex plugin marketplace add https://example.invalid/hidden.git --ref v1.0.1 -->\n",
+    );
+    writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+    const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+    assert.deepEqual(result.errors, ["getting-started: stable installation must pin v1.0.1"]);
+  });
+
+  await t.test("visible commands around comments do not conflict with hidden refs", (t) => {
+    const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+    writeText(path.join(fixture.root, "README.md"), [
+      "# AI Marketplace",
+      "",
+      "codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1 <!-- codex plugin marketplace add https://example.invalid/hidden-main.git --ref main -->",
+      "<!--",
+      "codex plugin marketplace add https://example.invalid/hidden-old.git --ref v1.0.0",
+      "-->",
+      "codex plugin add frontend-engineering-standard@ai-marketplace",
+      "",
+      "https://github.com/tiantingrui/ai-marketplace",
+      "Apache License 2.0",
+      "",
+    ].join("\n"));
+    writeText(path.join(fixture.root, "docs/getting-started.md"), [
+      "# Getting started",
+      "",
+      "<!-- codex plugin marketplace add https://example.invalid/hidden-main.git --ref main --> codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1",
+      "<!--",
+      "codex plugin marketplace add https://example.invalid/hidden-old.git --ref v1.0.0",
+      "-->",
+      "",
+    ].join("\n"));
+    writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+    const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+    assert.deepEqual(result.errors, []);
+  });
+
+  await t.test("comments do not create shell token boundaries", (t) => {
+    const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+    writeText(
+      path.join(fixture.root, "docs/getting-started.md"),
+      "# Getting started\n\ncodex<!-- -->plugin<!-- -->marketplace<!-- -->add https://example.invalid/not-a-command.git --ref v1.0.1\n",
+    );
+    writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+    const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+    assert.deepEqual(result.errors, ["getting-started: stable installation must pin v1.0.1"]);
+  });
+
+  await t.test("comments inside shell tokens are removed without adding whitespace", (t) => {
+    const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+    writeText(
+      path.join(fixture.root, "docs/getting-started.md"),
+      "# Getting started\n\nco<!-- hidden -->dex pl<!-- -->ugin market<!-- -->place a<!-- -->dd https://example.invalid/current.git --r<!-- -->ef v1.0.1\n",
+    );
+    writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+    const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+    assert.deepEqual(result.errors, []);
+  });
+
+  await t.test("fenced code remains a visible installation example", (t) => {
+    const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+    writeText(path.join(fixture.root, "docs/getting-started.md"), [
+      "# Getting started",
+      "",
+      "```bash <!-- literal fence info",
+      "codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1",
+      "```",
+      "",
+    ].join("\n"));
+    writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+    const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+    assert.deepEqual(result.errors, []);
+  });
+});
+
 test("repository release recognizes Marketplace add commands after shell assignments", (t) => {
   const fixture = createRepositoryReleaseFixture(t, "1.0.1");
   writeText(path.join(fixture.root, "docs/getting-started.md"), [

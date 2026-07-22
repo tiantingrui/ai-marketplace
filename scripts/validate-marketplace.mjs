@@ -176,7 +176,8 @@ function marketplaceAddCommands(content) {
   const commands = [];
   // This intentionally recognizes only simple shell segments that begin with the exact
   // Marketplace add command. Other commands and inline prose are outside this parser's scope.
-  for (const segment of splitShellCommandSegments(content)) {
+  const visibleContent = markdownVisibleLines(content).map(({ visibleLine }) => visibleLine).join("\n");
+  for (const segment of splitShellCommandSegments(visibleContent)) {
     const parsed = parseShellWords(segment);
     let offset = parsed.words[0] === "$" ? 1 : 0;
     while (SHELL_ASSIGNMENT_WORD_PATTERN.test(parsed.words[offset] ?? "")) offset += 1;
@@ -246,41 +247,51 @@ function validateStableInstallationRefs(content, label, currentRef, errors, { re
 
 function stripHtmlCommentsFromMarkdownLine(line, state) {
   let visible = "";
+  let columnPreserving = "";
   let cursor = 0;
   while (cursor < line.length) {
     if (state.inComment) {
       const end = line.indexOf("-->", cursor);
-      if (end === -1) return visible;
-      visible += " ".repeat(end + 3 - cursor);
+      if (end === -1) return { visible, columnPreserving };
+      columnPreserving += " ".repeat(end + 3 - cursor);
       cursor = end + 3;
       state.inComment = false;
       continue;
     }
 
     const start = line.indexOf("<!--", cursor);
-    if (start === -1) return visible + line.slice(cursor);
-    visible += line.slice(cursor, start);
+    if (start === -1) {
+      const remainder = line.slice(cursor);
+      return {
+        visible: visible + remainder,
+        columnPreserving: columnPreserving + remainder,
+      };
+    }
+    const remainder = line.slice(cursor, start);
+    visible += remainder;
+    columnPreserving += remainder;
     const end = line.indexOf("-->", start + 4);
     if (end === -1) {
       state.inComment = true;
-      return visible;
+      return { visible, columnPreserving };
     }
-    visible += " ".repeat(end + 3 - start);
+    columnPreserving += " ".repeat(end + 3 - start);
     cursor = end + 3;
   }
-  return visible;
+  return { visible, columnPreserving };
 }
 
-function hasMarkdownReleaseHeading(content, version) {
-  const headingPattern = new RegExp(`^ {0,3}## ${escapeRegExp(version)} -`);
+function markdownVisibleLines(content) {
   const commentState = { inComment: false };
   let fence = null;
+  const lines = [];
   for (const rawLine of content.split(/\r?\n/)) {
     if (fence) {
       const closingPattern = new RegExp(
         `^ {0,3}${escapeRegExp(fence.character)}{${fence.length},}[\\t ]*$`,
       );
       if (closingPattern.test(rawLine)) fence = null;
+      lines.push({ line: rawLine, visibleLine: rawLine, fenced: true });
       continue;
     }
 
@@ -288,15 +299,22 @@ function hasMarkdownReleaseHeading(content, version) {
       const opening = rawLine.match(/^ {0,3}(`{3,}|~{3,})/);
       if (opening) {
         fence = { character: opening[1][0], length: opening[1].length };
+        lines.push({ line: rawLine, visibleLine: rawLine, fenced: true });
         continue;
       }
     }
 
-    const line = stripHtmlCommentsFromMarkdownLine(rawLine, commentState);
-    if (commentState.inComment && line.trim() === "") continue;
-    if (headingPattern.test(line)) return true;
+    const { visible, columnPreserving } = stripHtmlCommentsFromMarkdownLine(rawLine, commentState);
+    lines.push({ line: columnPreserving, visibleLine: visible, fenced: false });
   }
-  return false;
+  return lines;
+}
+
+function hasMarkdownReleaseHeading(content, version) {
+  const headingPattern = new RegExp(`^ {0,3}## ${escapeRegExp(version)} -`);
+  return markdownVisibleLines(content).some(({ line, fenced }) => (
+    !fenced && headingPattern.test(line)
+  ));
 }
 
 function toPosix(value) {
