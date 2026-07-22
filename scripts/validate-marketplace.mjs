@@ -61,7 +61,7 @@ function splitShellCommandSegments(content) {
   let segment = "";
   let quote = null;
   const finishSegment = () => {
-    const trimmed = segment.trim();
+    const trimmed = segment.replace(/^[\t ]+|[\t ]+$/g, "");
     if (trimmed) segments.push(trimmed);
     segment = "";
   };

@@ -1002,6 +1002,29 @@ test("repository release redacts unsafe characters from invalid ref diagnostics"
   for (const unsafeCharacter of unsafeCharacters) assert.equal(diagnostics.includes(unsafeCharacter), false);
 });
 
+test("repository release rejects trailing unsafe characters without echoing them", async (t) => {
+  for (const unsafeCharacter of ["\u000b", "\u000c", "\u2028", "\u2029"]) {
+    await t.test(`U+${unsafeCharacter.codePointAt(0).toString(16).toUpperCase()}`, (t) => {
+      const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+      writeText(path.join(fixture.root, "docs/getting-started.md"), [
+        "# Getting started",
+        "",
+        "codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1",
+        `codex plugin marketplace add https://example.invalid/unsafe.git --ref v1.0.1${unsafeCharacter}`,
+        "",
+      ].join("\n"));
+      writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+      const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+      assert.deepEqual(result.errors, [
+        "getting-started: Marketplace add ref must not contain control characters",
+      ]);
+      assert.equal(result.errors.join("\n").includes(unsafeCharacter), false);
+    });
+  }
+});
+
 test("repository release keeps unquoted unsafe characters inside ref tokens", async (t) => {
   for (const unsafeCharacter of ["\u000b", "\u000c", "\u2028", "\u2029"]) {
     await t.test(`U+${unsafeCharacter.codePointAt(0).toString(16).toUpperCase()}`, (t) => {
