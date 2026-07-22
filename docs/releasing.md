@@ -13,10 +13,12 @@
 9. 合并到 `main` 后创建带说明的语义化标签，例如：
 
    ```bash
-   git tag -a v1.0.0 -m "release: ai-marketplace v1.0.0"
+   git tag -a v1.0.1 -m "release: ai-marketplace v1.0.1"
    git push origin main
-   git push origin v1.0.0
+   git push origin v1.0.1
    ```
+
+   标签、推送、GitHub Release 和其他远端写入必须获得维护者单独明确授权；完成本地发布准备不代表这些动作已经执行。
 
 10. 从远端标签执行一次干净安装，再创建 GitHub Release。
 
