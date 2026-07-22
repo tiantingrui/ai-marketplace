@@ -874,6 +874,34 @@ export function validateRepositoryRelease(topology, bundles) {
     if (!readme.includes("Apache License 2.0")) errors.push("README: Apache-2.0 license must be documented");
   }
 
+  if (rootPackage) {
+    const gettingStartedPath = checkedPath(
+      root,
+      path.join(root, "docs", "getting-started.md"),
+      "docs/getting-started.md",
+      "file",
+      errors,
+    );
+    const gettingStarted = gettingStartedPath
+      ? readText(root, gettingStartedPath, "docs/getting-started.md", errors)
+      : null;
+    if (gettingStarted !== null && !gettingStarted.includes(`--ref v${rootPackage.version}`)) {
+      errors.push(`getting-started: stable installation must pin v${rootPackage.version}`);
+    }
+
+    const changelogPath = checkedPath(
+      root,
+      path.join(root, "CHANGELOG.md"),
+      "CHANGELOG.md",
+      "file",
+      errors,
+    );
+    const changelog = changelogPath ? readText(root, changelogPath, "CHANGELOG.md", errors) : null;
+    if (changelog !== null && !changelog.includes(`## ${rootPackage.version} -`)) {
+      errors.push(`CHANGELOG: missing ${rootPackage.version} release heading`);
+    }
+  }
+
   const licensePath = checkedPath(root, path.join(root, "LICENSE"), "LICENSE", "file", errors);
   const license = licensePath ? readText(root, licensePath, "LICENSE", errors) : null;
   if (license !== null && (!license.includes("Apache License") || !license.includes("Version 2.0, January 2004"))) {

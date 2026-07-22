@@ -35,6 +35,21 @@ const STANDARD_RUNTIME_FILES = [
   "scripts/lib/impact-analyzer.mjs",
   "scripts/lib/review-context.mjs",
 ];
+const PUBLIC_RELEASE_FILES = [
+  ".github/CODEOWNERS",
+  ".github/pull_request_template.md",
+  ".github/workflows/validate.yml",
+  "CHANGELOG.md",
+  "CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+  "LICENSE",
+  "SECURITY.md",
+  "docs/architecture.md",
+  "docs/configuration.md",
+  "docs/getting-started.md",
+  "docs/releasing.md",
+  "examples/project-config.example.json",
+];
 function writeText(file, content) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
@@ -240,6 +255,38 @@ function createStandardGateFixture(t, { skills = ["audit"], ui = true } = {}) {
   const bundles = topology.plugins.map((plugin) => validatePluginBundle(topology, plugin));
   assert.deepEqual([...topology.errors, ...bundles.flatMap((bundle) => bundle.errors)], []);
   return { root, pluginRoot, topology, bundles };
+}
+
+function createRepositoryReleaseFixture(t, version) {
+  const fixture = createStandardGateFixture(t);
+  writeJson(path.join(fixture.root, ".agents/plugins/marketplace.json"), {
+    name: "ai-marketplace",
+    interface: { displayName: "AI Marketplace" },
+    plugins: [marketplaceEntry("frontend-engineering-standard")],
+  });
+  const manifestPath = path.join(fixture.pluginRoot, ".codex-plugin/plugin.json");
+  writeJson(manifestPath, { ...JSON.parse(fs.readFileSync(manifestPath, "utf8")), version });
+  writeJson(path.join(fixture.root, "package.json"), { version, license: "Apache-2.0" });
+
+  for (const file of PUBLIC_RELEASE_FILES) {
+    writeText(path.join(fixture.root, file), `# ${file}\n`);
+  }
+  writeText(path.join(fixture.root, "LICENSE"), "Apache License\nVersion 2.0, January 2004\n");
+  writeText(path.join(fixture.root, "README.md"), [
+    "# AI Marketplace",
+    "",
+    `codex plugin install frontend-engineering-standard@ai-marketplace --ref v${version}`,
+    "",
+    "https://github.com/tiantingrui/ai-marketplace",
+    "",
+    "Apache License 2.0",
+    "",
+  ].join("\n"));
+
+  const topology = validateMarketplaceTopology(fixture.root);
+  const bundles = topology.plugins.map((plugin) => validatePluginBundle(topology, plugin));
+  assert.deepEqual([...topology.errors, ...bundles.flatMap((bundle) => bundle.errors)], []);
+  return { ...fixture, topology, bundles };
 }
 
 test("marketplace topology and bundles discover two local plugins with optional skills", (t) => {
@@ -630,6 +677,21 @@ test("validator layers return diagnostics instead of throwing for invalid invoca
   assert.doesNotThrow(() => validateFrontendEngineeringStandard(null, null));
   assert.doesNotThrow(() => validateRepositoryRelease(null, null));
   assert.doesNotThrow(() => validateMarketplace(null));
+});
+
+test("repository release requires stable documentation to match the package version", (t) => {
+  const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+  writeText(
+    path.join(fixture.root, "docs/getting-started.md"),
+    "# Getting started\n\ncodex plugin install frontend-engineering-standard@ai-marketplace --ref v1.0.0\n",
+  );
+  writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.0 - 2026-07-01\n");
+
+  const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+  assert.ok(result.errors.includes("getting-started: stable installation must pin v1.0.1"));
+  assert.ok(result.errors.includes("CHANGELOG: missing 1.0.1 release heading"));
+  assert.equal(result.errors.length, 2, result.errors.join("\n"));
 });
 
 test("public hygiene traversal skips external file and directory symbolic links", (t) => {
