@@ -733,6 +733,26 @@ test("repository release rejects conflicting refs in stable documentation", (t) 
   ]);
 });
 
+test("repository release recognizes Marketplace add commands after shell assignments", (t) => {
+  const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+  writeText(path.join(fixture.root, "docs/getting-started.md"), [
+    "# Getting started",
+    "",
+    "codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1",
+    "CODEX_HOME=/tmp OTHER=x codex plugin marketplace add https://example.invalid/conflict.git --ref main",
+    "$ CODEX_HOME=\"/tmp/codex home\" codex plugin marketplace add https://example.invalid/prompt.git --ref v1.0.1",
+    "not-an-assignment CODEX_HOME=/tmp codex plugin marketplace add https://example.invalid/ignored.git --ref v1.0.0",
+    "",
+  ].join("\n"));
+  writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+  const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+  assert.deepEqual(result.errors, [
+    "getting-started: stable installation refs must only use v1.0.1; found main",
+  ]);
+});
+
 test("repository release requires a real CHANGELOG release heading", (t) => {
   const fixture = createRepositoryReleaseFixture(t, "1.0.1");
   writeText(
@@ -747,6 +767,38 @@ test("repository release requires a real CHANGELOG release heading", (t) => {
   const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
 
   assert.deepEqual(result.errors, ["CHANGELOG: missing 1.0.1 release heading"]);
+});
+
+test("repository release only accepts CHANGELOG headings outside Markdown containers", async (t) => {
+  const cases = [
+    ["backtick fence", "# Changelog\n\n```markdown\n## 1.0.1 - example\n```\n", true],
+    ["tilde fence", "# Changelog\n\n~~~markdown\n## 1.0.1 - example\n~~~\n", true],
+    ["HTML comment", "# Changelog\n\n<!--\n## 1.0.1 - example\n-->\n", true],
+    [
+      "fence info with comment marker",
+      "# Changelog\n\n```markdown <!--\n## 1.0.1 - example\n```\n\n## 1.0.1 - 2026-07-22\n",
+      false,
+    ],
+    ["three-space heading", "# Changelog\n\n   ## 1.0.1 - 2026-07-22\n", false],
+    ["four-space heading", "# Changelog\n\n    ## 1.0.1 - code block\n", true],
+  ];
+  for (const [name, changelog, missing] of cases) {
+    await t.test(name, (t) => {
+      const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+      writeText(
+        path.join(fixture.root, "docs/getting-started.md"),
+        "# Getting started\n\ncodex plugin marketplace add https://example.invalid/repository.git --ref v1.0.1\n",
+      );
+      writeText(path.join(fixture.root, "CHANGELOG.md"), changelog);
+
+      const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+      assert.deepEqual(
+        result.errors,
+        missing ? ["CHANGELOG: missing 1.0.1 release heading"] : [],
+      );
+    });
+  }
 });
 
 test("repository release ignores refs outside executable Marketplace add commands", (t) => {
@@ -798,15 +850,24 @@ test("repository release rejects Marketplace add commands with empty, missing, o
   ]);
 });
 
-test("repository release redacts control characters from invalid ref diagnostics", (t) => {
+test("repository release redacts unsafe characters from invalid ref diagnostics", (t) => {
   const fixture = createRepositoryReleaseFixture(t, "1.0.1");
-  const controls = ["\u0000", "\u001b", "\u0085"];
+  const unsafeCharacters = [
+    "\u0000",
+    "\u001b",
+    "\u0085",
+    "\u061c",
+    "\u200e",
+    "\u2028",
+    "\u202e",
+    "\u2066",
+  ];
   writeText(path.join(fixture.root, "README.md"), [
     "# AI Marketplace",
     "",
     "codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1",
-    ...controls.map((control) => (
-      `codex plugin marketplace add https://example.invalid/unsafe.git --ref \"v1.0.0${control}unsafe\"`
+    ...unsafeCharacters.map((unsafeCharacter) => (
+      `codex plugin marketplace add https://example.invalid/unsafe.git --ref \"v1.0.0${unsafeCharacter}unsafe\"`
     )),
     "codex plugin add frontend-engineering-standard@ai-marketplace",
     "",
@@ -824,7 +885,30 @@ test("repository release redacts control characters from invalid ref diagnostics
   const diagnostics = result.errors.join("\n");
 
   assert.deepEqual(result.errors, ["README: Marketplace add ref must not contain control characters"]);
-  for (const control of controls) assert.equal(diagnostics.includes(control), false);
+  for (const unsafeCharacter of unsafeCharacters) assert.equal(diagnostics.includes(unsafeCharacter), false);
+});
+
+test("repository release keeps unquoted unsafe characters inside ref tokens", async (t) => {
+  for (const unsafeCharacter of ["\u000b", "\u000c", "\u2028", "\u2029"]) {
+    await t.test(`U+${unsafeCharacter.codePointAt(0).toString(16).toUpperCase()}`, (t) => {
+      const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+      writeText(path.join(fixture.root, "docs/getting-started.md"), [
+        "# Getting started",
+        "",
+        "codex plugin marketplace add https://example.invalid/current.git --ref v1.0.1",
+        `codex plugin marketplace add https://example.invalid/unsafe.git --ref v1.0.1${unsafeCharacter}unsafe`,
+        "",
+      ].join("\n"));
+      writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+      const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+      assert.deepEqual(result.errors, [
+        "getting-started: Marketplace add ref must not contain control characters",
+      ]);
+      assert.equal(result.errors.join("\n").includes(unsafeCharacter), false);
+    });
+  }
 });
 
 test("repository release follows shell quoting rules for logical lines", (t) => {

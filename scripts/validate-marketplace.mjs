@@ -29,8 +29,9 @@ const REQUIRED_SCHEMAS = [
 ];
 const SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema";
 const SCHEMA_ID_BASE = "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/";
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+const UNSAFE_DIAGNOSTIC_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const SHELL_ASSIGNMENT_WORD_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const REQUIRED_PUBLIC_FILES = [
   ".github/CODEOWNERS",
   ".github/pull_request_template.md",
@@ -156,7 +157,7 @@ function parseShellWords(command) {
     if (character === "'" || character === '"') {
       quote = character;
       active = true;
-    } else if (/\s/.test(character)) {
+    } else if (character === " " || character === "\t") {
       finishWord();
     } else if (character === "\\" && index + 1 < command.length) {
       index += 1;
@@ -177,7 +178,8 @@ function marketplaceAddCommands(content) {
   // Marketplace add command. Other commands and inline prose are outside this parser's scope.
   for (const segment of splitShellCommandSegments(content)) {
     const parsed = parseShellWords(segment);
-    const offset = parsed.words[0] === "$" ? 1 : 0;
+    let offset = parsed.words[0] === "$" ? 1 : 0;
+    while (SHELL_ASSIGNMENT_WORD_PATTERN.test(parsed.words[offset] ?? "")) offset += 1;
     if (
       parsed.words[offset] === "codex"
       && parsed.words[offset + 1] === "plugin"
@@ -215,7 +217,7 @@ function stableInstallationRefs(content, label, errors) {
       invalidCardinality = true;
       continue;
     }
-    if (CONTROL_CHARACTER_PATTERN.test(commandRefs[0])) {
+    if (UNSAFE_DIAGNOSTIC_CHARACTER_PATTERN.test(commandRefs[0])) {
       unsafeRef = true;
       continue;
     }
@@ -240,6 +242,61 @@ function validateStableInstallationRefs(content, label, currentRef, errors, { re
   if (unexpected.length > 0) {
     errors.push(`${label}: stable installation refs must only use ${currentRef}; found ${unexpected.join(", ")}`);
   }
+}
+
+function stripHtmlCommentsFromMarkdownLine(line, state) {
+  let visible = "";
+  let cursor = 0;
+  while (cursor < line.length) {
+    if (state.inComment) {
+      const end = line.indexOf("-->", cursor);
+      if (end === -1) return visible;
+      visible += " ".repeat(end + 3 - cursor);
+      cursor = end + 3;
+      state.inComment = false;
+      continue;
+    }
+
+    const start = line.indexOf("<!--", cursor);
+    if (start === -1) return visible + line.slice(cursor);
+    visible += line.slice(cursor, start);
+    const end = line.indexOf("-->", start + 4);
+    if (end === -1) {
+      state.inComment = true;
+      return visible;
+    }
+    visible += " ".repeat(end + 3 - start);
+    cursor = end + 3;
+  }
+  return visible;
+}
+
+function hasMarkdownReleaseHeading(content, version) {
+  const headingPattern = new RegExp(`^ {0,3}## ${escapeRegExp(version)} -`);
+  const commentState = { inComment: false };
+  let fence = null;
+  for (const rawLine of content.split(/\r?\n/)) {
+    if (fence) {
+      const closingPattern = new RegExp(
+        `^ {0,3}${escapeRegExp(fence.character)}{${fence.length},}[\\t ]*$`,
+      );
+      if (closingPattern.test(rawLine)) fence = null;
+      continue;
+    }
+
+    if (!commentState.inComment) {
+      const opening = rawLine.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (opening) {
+        fence = { character: opening[1][0], length: opening[1].length };
+        continue;
+      }
+    }
+
+    const line = stripHtmlCommentsFromMarkdownLine(rawLine, commentState);
+    if (commentState.inComment && line.trim() === "") continue;
+    if (headingPattern.test(line)) return true;
+  }
+  return false;
 }
 
 function toPosix(value) {
@@ -1099,8 +1156,7 @@ export function validateRepositoryRelease(topology, bundles) {
       errors,
     );
     const changelog = changelogPath ? readText(root, changelogPath, "CHANGELOG.md", errors) : null;
-    const releaseHeading = new RegExp(`^## ${escapeRegExp(rootVersion)} -`, "m");
-    if (changelog !== null && !releaseHeading.test(changelog)) {
+    if (changelog !== null && !hasMarkdownReleaseHeading(changelog, rootVersion)) {
       errors.push(`CHANGELOG: missing ${rootVersion} release heading`);
     }
   }
