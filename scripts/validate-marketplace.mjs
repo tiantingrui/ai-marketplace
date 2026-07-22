@@ -29,6 +29,8 @@ const REQUIRED_SCHEMAS = [
 ];
 const SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema";
 const SCHEMA_ID_BASE = "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/";
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const REQUIRED_PUBLIC_FILES = [
   ".github/CODEOWNERS",
   ".github/pull_request_template.md",
@@ -53,13 +55,181 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function stableInstallationRefs(content) {
-  const pattern = /(?<![^\s;&|()])--ref(?:(?:[^\S\r\n]|\\\r?\n)+|=)(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"'`\\;&|()]+))/g;
-  return unique([...content.matchAll(pattern)].map((match) => match[1] ?? match[2] ?? match[3]));
+function splitShellCommandSegments(content) {
+  const segments = [];
+  let segment = "";
+  let quote = null;
+  const finishSegment = () => {
+    const trimmed = segment.trim();
+    if (trimmed) segments.push(trimmed);
+    segment = "";
+  };
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (quote === "'") {
+      segment += character;
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') {
+        quote = null;
+        segment += character;
+      } else if (character === "\\") {
+        const next = content[index + 1];
+        if (next === "\n") index += 1;
+        else if (next === "\r" && content[index + 2] === "\n") index += 2;
+        else if (next !== undefined) {
+          segment += `${character}${next}`;
+          index += 1;
+        } else {
+          segment += character;
+        }
+      } else {
+        segment += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      segment += character;
+    } else if (character === "\\") {
+      const next = content[index + 1];
+      if (next === "\n") index += 1;
+      else if (next === "\r" && content[index + 2] === "\n") index += 2;
+      else if (next !== undefined) {
+        segment += `${character}${next}`;
+        index += 1;
+      } else {
+        segment += character;
+      }
+    } else if (character === "#" && (segment === "" || /\s/.test(segment.at(-1)))) {
+      while (index + 1 < content.length && !["\r", "\n"].includes(content[index + 1])) index += 1;
+      finishSegment();
+    } else if (character === "\r" || character === "\n") {
+      if (character === "\r" && content[index + 1] === "\n") index += 1;
+      finishSegment();
+    } else if (";&|()".includes(character)) {
+      finishSegment();
+    } else {
+      segment += character;
+    }
+  }
+  finishSegment();
+  return segments;
+}
+
+function parseShellWords(command) {
+  const words = [];
+  let word = "";
+  let active = false;
+  let quote = null;
+  const finishWord = () => {
+    if (!active) return;
+    words.push(word);
+    word = "";
+    active = false;
+  };
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+        active = true;
+      } else if (quote === '"' && character === "\\" && index + 1 < command.length) {
+        const next = command[index + 1];
+        if (["$", "`", '"', "\\"].includes(next)) {
+          index += 1;
+          word += next;
+        } else {
+          word += character;
+        }
+        active = true;
+      } else {
+        word += character;
+        active = true;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      active = true;
+    } else if (/\s/.test(character)) {
+      finishWord();
+    } else if (character === "\\" && index + 1 < command.length) {
+      index += 1;
+      word += command[index];
+      active = true;
+    } else {
+      word += character;
+      active = true;
+    }
+  }
+  finishWord();
+  return { words, complete: quote === null };
+}
+
+function marketplaceAddCommands(content) {
+  const commands = [];
+  // This intentionally recognizes only simple shell segments that begin with the exact
+  // Marketplace add command. Other commands and inline prose are outside this parser's scope.
+  for (const segment of splitShellCommandSegments(content)) {
+    const parsed = parseShellWords(segment);
+    const offset = parsed.words[0] === "$" ? 1 : 0;
+    if (
+      parsed.words[offset] === "codex"
+      && parsed.words[offset + 1] === "plugin"
+      && parsed.words[offset + 2] === "marketplace"
+      && parsed.words[offset + 3] === "add"
+    ) {
+      commands.push({ ...parsed, arguments: parsed.words.slice(offset + 4) });
+    }
+  }
+  return commands;
+}
+
+function stableInstallationRefs(content, label, errors) {
+  const refs = [];
+  let invalidCardinality = false;
+  let unsafeRef = false;
+  for (const command of marketplaceAddCommands(content)) {
+    const commandRefs = [];
+    for (let index = 0; index < command.arguments.length; index += 1) {
+      const argument = command.arguments[index];
+      if (argument === "--ref") {
+        const next = command.arguments[index + 1];
+        if (next === undefined || next.startsWith("--")) {
+          commandRefs.push(null);
+        } else {
+          commandRefs.push(next);
+          index += 1;
+        }
+      } else if (argument.startsWith("--ref=")) {
+        commandRefs.push(argument.slice("--ref=".length));
+      }
+    }
+
+    if (!command.complete || commandRefs.length !== 1 || !commandRefs[0]) {
+      invalidCardinality = true;
+      continue;
+    }
+    if (CONTROL_CHARACTER_PATTERN.test(commandRefs[0])) {
+      unsafeRef = true;
+      continue;
+    }
+    refs.push(commandRefs[0]);
+  }
+  if (invalidCardinality) {
+    errors.push(`${label}: each Marketplace add command must have exactly one non-empty --ref`);
+  }
+  if (unsafeRef) errors.push(`${label}: Marketplace add ref must not contain control characters`);
+  return unique(refs);
 }
 
 function validateStableInstallationRefs(content, label, currentRef, errors, { readme = false } = {}) {
-  const refs = stableInstallationRefs(content);
+  const refs = stableInstallationRefs(content, label, errors);
   if (!refs.includes(currentRef)) errors.push(`${label}: stable installation must pin ${currentRef}`);
 
   let unexpected = refs.filter((ref) => ref !== currentRef);
@@ -883,10 +1053,16 @@ export function validateRepositoryRelease(topology, bundles) {
 
   const packagePath = checkedPath(root, path.join(root, "package.json"), "package.json", "file", errors);
   const rootPackage = packagePath ? readJson(root, packagePath, "package.json", errors) : null;
-  const rootVersion = typeof rootPackage?.version === "string" && rootPackage.version.trim() !== ""
-    ? rootPackage.version
-    : null;
-  if (rootPackage && rootVersion === null) errors.push("package.json: version must be a non-empty string");
+  let rootVersion = null;
+  if (rootPackage) {
+    if (typeof rootPackage.version !== "string" || rootPackage.version.trim() === "") {
+      errors.push("package.json: version must be a non-empty string");
+    } else if (!SEMVER_PATTERN.test(rootPackage.version)) {
+      errors.push("package.json: version must use semver");
+    } else {
+      rootVersion = rootPackage.version;
+    }
+  }
   if (rootVersion && standard?.manifest && standard.manifest.version?.split("+")[0] !== rootVersion) {
     errors.push("package.json and plugin base versions must match");
   }
