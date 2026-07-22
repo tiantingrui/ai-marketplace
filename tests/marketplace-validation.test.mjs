@@ -690,8 +690,77 @@ test("repository release requires stable documentation to match the package vers
   const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
 
   assert.ok(result.errors.includes("getting-started: stable installation must pin v1.0.1"));
+  assert.ok(result.errors.includes(
+    "getting-started: stable installation refs must only use v1.0.1; found v1.0.0",
+  ));
   assert.ok(result.errors.includes("CHANGELOG: missing 1.0.1 release heading"));
-  assert.equal(result.errors.length, 2, result.errors.join("\n"));
+  assert.equal(result.errors.length, 3, result.errors.join("\n"));
+});
+
+test("repository release rejects conflicting refs in stable documentation", (t) => {
+  const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+  writeText(path.join(fixture.root, "README.md"), [
+    "# AI Marketplace",
+    "",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref v1.0.1;",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref=main",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref=v1.0.0",
+    "prefix--ref v9.9.9 is not a command option",
+    "codex plugin add frontend-engineering-standard@ai-marketplace",
+    "",
+    "Apache License 2.0",
+    "",
+  ].join("\n"));
+  writeText(path.join(fixture.root, "docs/getting-started.md"), [
+    "# Getting started",
+    "",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref v1.0.1|",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref main",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref \\",
+    "  v1.0.0",
+    "codex plugin marketplace add https://github.com/tiantingrui/ai-marketplace.git --ref \"v1.0.0\"",
+    "",
+  ].join("\n"));
+  writeText(path.join(fixture.root, "CHANGELOG.md"), "# Changelog\n\n## 1.0.1 - 2026-07-22\n");
+
+  const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+  assert.deepEqual(result.errors, [
+    "README: stable installation must not track main",
+    "README: stable installation refs must only use v1.0.1; found v1.0.0",
+    "getting-started: stable installation refs must only use v1.0.1; found main, v1.0.0",
+  ]);
+});
+
+test("repository release requires a real CHANGELOG release heading", (t) => {
+  const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+  writeText(
+    path.join(fixture.root, "docs/getting-started.md"),
+    "# Getting started\n\ncodex plugin marketplace add https://example.invalid/repository.git --ref v1.0.1\n",
+  );
+  writeText(
+    path.join(fixture.root, "CHANGELOG.md"),
+    "# Changelog\n\nThis paragraph only mentions `## 1.0.1 -` as an example.\n",
+  );
+
+  const result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+
+  assert.deepEqual(result.errors, ["CHANGELOG: missing 1.0.1 release heading"]);
+});
+
+test("repository release diagnoses an invalid package version without throwing", async (t) => {
+  for (const [name, version] of [["missing", undefined], ["non-string", 101]]) {
+    await t.test(name, (t) => {
+      const fixture = createRepositoryReleaseFixture(t, "1.0.1");
+      writeJson(path.join(fixture.root, "package.json"), { version, license: "Apache-2.0" });
+
+      let result;
+      assert.doesNotThrow(() => {
+        result = validateRepositoryRelease(fixture.topology, fixture.bundles);
+      });
+      assert.deepEqual(result.errors, ["package.json: version must be a non-empty string"]);
+    });
+  }
 });
 
 test("public hygiene traversal skips external file and directory symbolic links", (t) => {

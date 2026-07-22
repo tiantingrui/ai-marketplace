@@ -49,6 +49,29 @@ function unique(values) {
   return [...new Set(values)];
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stableInstallationRefs(content) {
+  const pattern = /(?<![^\s;&|()])--ref(?:(?:[^\S\r\n]|\\\r?\n)+|=)(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"'`\\;&|()]+))/g;
+  return unique([...content.matchAll(pattern)].map((match) => match[1] ?? match[2] ?? match[3]));
+}
+
+function validateStableInstallationRefs(content, label, currentRef, errors, { readme = false } = {}) {
+  const refs = stableInstallationRefs(content);
+  if (!refs.includes(currentRef)) errors.push(`${label}: stable installation must pin ${currentRef}`);
+
+  let unexpected = refs.filter((ref) => ref !== currentRef);
+  if (readme && unexpected.includes("main")) {
+    errors.push("README: stable installation must not track main");
+    unexpected = unexpected.filter((ref) => ref !== "main");
+  }
+  if (unexpected.length > 0) {
+    errors.push(`${label}: stable installation refs must only use ${currentRef}; found ${unexpected.join(", ")}`);
+  }
+}
+
 function toPosix(value) {
   return value.split(path.sep).join("/");
 }
@@ -860,7 +883,11 @@ export function validateRepositoryRelease(topology, bundles) {
 
   const packagePath = checkedPath(root, path.join(root, "package.json"), "package.json", "file", errors);
   const rootPackage = packagePath ? readJson(root, packagePath, "package.json", errors) : null;
-  if (rootPackage && standard?.manifest && standard.manifest.version?.split("+")[0] !== rootPackage.version) {
+  const rootVersion = typeof rootPackage?.version === "string" && rootPackage.version.trim() !== ""
+    ? rootPackage.version
+    : null;
+  if (rootPackage && rootVersion === null) errors.push("package.json: version must be a non-empty string");
+  if (rootVersion && standard?.manifest && standard.manifest.version?.split("+")[0] !== rootVersion) {
     errors.push("package.json and plugin base versions must match");
   }
 
@@ -868,13 +895,12 @@ export function validateRepositoryRelease(topology, bundles) {
   const readme = readmePath ? readText(root, readmePath, "README.md", errors) : null;
   if (readme !== null && rootPackage) {
     if (!readme.includes(`${PLUGIN_NAME}@${MARKETPLACE_NAME}`)) errors.push("README: missing public plugin selector");
-    if (!readme.includes(`--ref v${rootPackage.version}`)) errors.push(`README: stable installation must pin v${rootPackage.version}`);
-    if (readme.includes("--ref main")) errors.push("README: stable installation must not track main");
+    if (rootVersion) validateStableInstallationRefs(readme, "README", `v${rootVersion}`, errors, { readme: true });
     if (!readme.includes("https://github.com/tiantingrui/ai-marketplace")) errors.push("README: missing public repository URL");
     if (!readme.includes("Apache License 2.0")) errors.push("README: Apache-2.0 license must be documented");
   }
 
-  if (rootPackage) {
+  if (rootVersion) {
     const gettingStartedPath = checkedPath(
       root,
       path.join(root, "docs", "getting-started.md"),
@@ -885,8 +911,8 @@ export function validateRepositoryRelease(topology, bundles) {
     const gettingStarted = gettingStartedPath
       ? readText(root, gettingStartedPath, "docs/getting-started.md", errors)
       : null;
-    if (gettingStarted !== null && !gettingStarted.includes(`--ref v${rootPackage.version}`)) {
-      errors.push(`getting-started: stable installation must pin v${rootPackage.version}`);
+    if (gettingStarted !== null) {
+      validateStableInstallationRefs(gettingStarted, "getting-started", `v${rootVersion}`, errors);
     }
 
     const changelogPath = checkedPath(
@@ -897,8 +923,9 @@ export function validateRepositoryRelease(topology, bundles) {
       errors,
     );
     const changelog = changelogPath ? readText(root, changelogPath, "CHANGELOG.md", errors) : null;
-    if (changelog !== null && !changelog.includes(`## ${rootPackage.version} -`)) {
-      errors.push(`CHANGELOG: missing ${rootPackage.version} release heading`);
+    const releaseHeading = new RegExp(`^## ${escapeRegExp(rootVersion)} -`, "m");
+    if (changelog !== null && !releaseHeading.test(changelog)) {
+      errors.push(`CHANGELOG: missing ${rootVersion} release heading`);
     }
   }
 
