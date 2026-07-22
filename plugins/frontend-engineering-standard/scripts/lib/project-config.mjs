@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readRepositoryTextFile } from "./git-evidence.mjs";
 
 export const CONFIG_FILE = ".ai-marketplace.json";
+const MAX_CONFIG_FILE_BYTES = 1024 * 1024;
 
 const DEFAULT_RISK_DOMAINS = [
   {
@@ -258,19 +260,23 @@ function validateInputShape(input) {
 export function loadProjectConfig(repository) {
   const file = path.join(repository, CONFIG_FILE);
   const defaults = clone(DEFAULT_CONFIG);
-  let metadata;
-  try {
-    metadata = fs.lstatSync(file);
-  } catch (error) {
-    if (error.code === "ENOENT") return { config: defaults, file: null, loaded: false };
-    throw error;
+  const content = readRepositoryTextFile(repository, CONFIG_FILE, { maxBytes: MAX_CONFIG_FILE_BYTES });
+  if (content === null) {
+    let metadata;
+    try {
+      metadata = fs.lstatSync(file);
+    } catch (error) {
+      if (error.code === "ENOENT") return { config: defaults, file: null, loaded: false };
+      throw error;
+    }
+    if (!metadata.isFile()) throw new Error(`${CONFIG_FILE}: must be a regular file inside the repository`);
+    if (metadata.size > MAX_CONFIG_FILE_BYTES) throw new Error(`${CONFIG_FILE}: file is too large`);
+    throw new Error(`${CONFIG_FILE}: could not be read safely`);
   }
-  if (!metadata.isFile()) throw new Error(`${CONFIG_FILE}: must be a regular file inside the repository`);
-  if (metadata.size > 1024 * 1024) throw new Error(`${CONFIG_FILE}: file is too large`);
 
   let input;
   try {
-    input = JSON.parse(fs.readFileSync(file, "utf8"));
+    input = JSON.parse(content);
   } catch (error) {
     throw new Error(`${CONFIG_FILE}: invalid JSON: ${error.message}`);
   }

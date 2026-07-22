@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import * as validatorModule from "../scripts/validate-marketplace.mjs";
+import { buildTrustedReadOpenFlags } from "../scripts/lib/fs-open-flags.mjs";
 import {
   validateFrontendEngineeringStandard,
   validateMarketplace,
@@ -51,6 +53,73 @@ function createFixture(t) {
 function runValidator(args, script = VALIDATOR) {
   return spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
 }
+
+function withControlledFileSwap({ file, externalFile, marker, trigger }, callback) {
+  const originalLstatSync = fs.lstatSync;
+  const originalReadFileSync = fs.readFileSync;
+  const originalRealpathSync = fs.realpathSync;
+  const absolute = originalRealpathSync.call(fs, path.resolve(file));
+  const backup = `${absolute}.before-swap`;
+  let matchingLstats = 0;
+  let markerRead = false;
+  let swapped = false;
+
+  const matches = (candidate) => typeof candidate === "string" && path.resolve(candidate) === absolute;
+  const swap = () => {
+    if (swapped) return;
+    fs.renameSync(absolute, backup);
+    fs.symlinkSync(externalFile, absolute, "file");
+    swapped = true;
+  };
+
+  fs.realpathSync = function controlledRealpathSync(candidate, ...args) {
+    const real = originalRealpathSync.call(fs, candidate, ...args);
+    if (trigger === "after-realpath" && matches(candidate)) swap();
+    return real;
+  };
+  fs.lstatSync = function controlledLstatSync(candidate, ...args) {
+    const metadata = originalLstatSync.call(fs, candidate, ...args);
+    if (matches(candidate)) {
+      matchingLstats += 1;
+      if (trigger === "after-second-lstat" && matchingLstats === 2) swap();
+    }
+    return metadata;
+  };
+  fs.readFileSync = function observedReadFileSync(candidate, ...args) {
+    const content = originalReadFileSync.call(fs, candidate, ...args);
+    if (String(content).includes(marker)) markerRead = true;
+    return content;
+  };
+
+  try {
+    const value = callback();
+    return { value, markerRead, swapped };
+  } finally {
+    fs.lstatSync = originalLstatSync;
+    fs.readFileSync = originalReadFileSync;
+    fs.realpathSync = originalRealpathSync;
+    if (swapped) {
+      fs.unlinkSync(absolute);
+      fs.renameSync(backup, absolute);
+    }
+  }
+}
+
+test("trusted read flags fall back when O_NOFOLLOW is unavailable", () => {
+  assert.equal(buildTrustedReadOpenFlags({ O_RDONLY: 8 }), 8);
+  assert.equal(buildTrustedReadOpenFlags({ O_RDONLY: 8, O_NOFOLLOW: "256" }), 8);
+  assert.equal(buildTrustedReadOpenFlags({ O_RDONLY: 8, O_NOFOLLOW: 256 }), 264);
+});
+
+test("validator module exposes exactly the five approved validation functions", () => {
+  assert.deepEqual(Object.keys(validatorModule).sort(), [
+    "validateFrontendEngineeringStandard",
+    "validateMarketplace",
+    "validateMarketplaceTopology",
+    "validatePluginBundle",
+    "validateRepositoryRelease",
+  ]);
+});
 
 function marketplaceEntry(name, sourcePath = `./plugins/${name}`) {
   return {
@@ -580,6 +649,80 @@ test("public hygiene traversal skips external file and directory symbolic links"
     result = validateRepositoryRelease(topology, bundles);
   });
   assert.doesNotMatch(result.errors.join("\n"), /linked-secret|credential-like/);
+});
+
+test("validator never reads files swapped to external symbolic links after validation", async (t) => {
+  const createExternalFile = (t, name, content) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "ai-marketplace-read-swap-"));
+    t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+    const file = path.join(outside, name);
+    writeText(file, content);
+    return file;
+  };
+
+  await t.test("plugin manifest", (t) => {
+    const { pluginRoot, topology, plugin } = createSingleBundleFixture(t);
+    const manifest = path.join(pluginRoot, ".codex-plugin/plugin.json");
+    const marker = "EXTERNAL_VALIDATOR_MANIFEST_MARKER";
+    const external = createExternalFile(t, "plugin.json", JSON.stringify({
+      ...pluginManifest("alpha"),
+      marker,
+    }));
+
+    const observed = withControlledFileSwap({
+      file: manifest,
+      externalFile: external,
+      marker,
+      trigger: "after-realpath",
+    }, () => validatePluginBundle(topology, plugin));
+
+    assert.equal(observed.swapped, true);
+    assert.equal(observed.markerRead, false, "external manifest marker must not be read");
+    assert.equal(observed.value.manifest, null);
+    assert.doesNotMatch(observed.value.errors.join("\n"), new RegExp(marker));
+  });
+
+  await t.test("Markdown document", (t) => {
+    const fixture = createStandardGateFixture(t);
+    const document = path.join(fixture.root, "docs/swap-note.md");
+    const marker = "EXTERNAL_VALIDATOR_MARKDOWN_MARKER";
+    writeText(document, "# Safe local document\n");
+    const external = createExternalFile(t, "swap-note.md", `[marker](missing-${marker}.md)\n`);
+
+    const observed = withControlledFileSwap({
+      file: document,
+      externalFile: external,
+      marker,
+      trigger: "after-realpath",
+    }, () => validateRepositoryRelease(fixture.topology, fixture.bundles));
+
+    const errors = observed.value.errors.join("\n");
+    assert.equal(observed.swapped, true);
+    assert.equal(observed.markerRead, false, "external Markdown marker must not be read");
+    assert.match(errors, /docs\/swap-note\.md/);
+    assert.doesNotMatch(errors, new RegExp(marker));
+  });
+
+  await t.test("ordinary public file", (t) => {
+    const fixture = createStandardGateFixture(t);
+    const publicFile = path.join(fixture.root, "public-note.txt");
+    const marker = "EXTERNAL_VALIDATOR_PUBLIC_MARKER";
+    writeText(publicFile, "safe public text\n");
+    const external = createExternalFile(t, "public-note.txt", `${marker}\nsk-${"a".repeat(30)}\n`);
+
+    const observed = withControlledFileSwap({
+      file: publicFile,
+      externalFile: external,
+      marker,
+      trigger: "after-second-lstat",
+    }, () => validateRepositoryRelease(fixture.topology, fixture.bundles));
+
+    const errors = observed.value.errors.join("\n");
+    assert.equal(observed.swapped, true);
+    assert.equal(observed.markerRead, false, "external public-file marker must not be read");
+    assert.match(errors, /public-note\.txt/);
+    assert.doesNotMatch(errors, new RegExp(marker));
+  });
 });
 
 test("repository release rejects Markdown links outside the Marketplace trust root", async (t) => {

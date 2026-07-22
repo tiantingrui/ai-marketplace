@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildTrustedReadOpenFlags } from "./lib/fs-open-flags.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -208,9 +209,51 @@ function normalizeDeclaredPath(value, label, errors, { requireDotSlash = false }
   return normalized;
 }
 
+function readTrustedFile(trustRoot, file, label, errors, {
+  encoding = null,
+  maxBytes = Number.POSITIVE_INFINITY,
+  skipInvalidType = false,
+} = {}) {
+  let descriptor;
+  try {
+    descriptor = fs.openSync(file, buildTrustedReadOpenFlags(fs.constants));
+    const openedMetadata = fs.fstatSync(descriptor);
+    if (!openedMetadata.isFile()) {
+      if (!skipInvalidType) errors.push(`${label} must be a regular file`);
+      return null;
+    }
+    if (openedMetadata.size > maxBytes) return null;
+
+    if (!checkedPath(trustRoot, file, label, "file", errors)) return null;
+    const pathMetadata = fs.lstatSync(file);
+    if (
+      !pathMetadata.isFile()
+      || pathMetadata.dev !== openedMetadata.dev
+      || pathMetadata.ino !== openedMetadata.ino
+    ) {
+      errors.push(`${label} changed while being read`);
+      return null;
+    }
+
+    const content = encoding === null ? fs.readFileSync(descriptor) : fs.readFileSync(descriptor, encoding);
+    if (Buffer.isBuffer(content) && content.length > maxBytes) return null;
+    return content;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        fs.closeSync(descriptor);
+      } catch {
+        // The descriptor may already be closed after a failed read.
+      }
+    }
+  }
+}
+
 function readJson(root, file, label, errors) {
   try {
-    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    const content = readTrustedFile(root, file, label, errors, { encoding: "utf8" });
+    if (content === null) return null;
+    const value = JSON.parse(content);
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       errors.push(`${label} must contain a JSON object`);
       return null;
@@ -222,17 +265,17 @@ function readJson(root, file, label, errors) {
   }
 }
 
-function readText(file, label, errors) {
+function readText(root, file, label, errors) {
   try {
-    return fs.readFileSync(file, "utf8");
+    return readTrustedFile(root, file, label, errors, { encoding: "utf8" });
   } catch (error) {
     errors.push(`${label} cannot be read: ${error.message}`);
     return null;
   }
 }
 
-function parseFrontmatter(file, label, errors) {
-  const content = readText(file, label, errors);
+function parseFrontmatter(root, file, label, errors) {
+  const content = readText(root, file, label, errors);
   if (content === null) return { content: "", metadata: {} };
   const match = content.match(/^---\n([\s\S]*?)\n---\n/);
   if (!match) {
@@ -397,7 +440,7 @@ function discoverBundleSkills(topology, plugin, manifest, errors) {
       errors,
     );
     if (skillFile) {
-      const { content, metadata } = parseFrontmatter(skillFile, `${skillLabel}: SKILL.md`, errors);
+      const { content, metadata } = parseFrontmatter(skillRoot, skillFile, `${skillLabel}: SKILL.md`, errors);
       if (metadata.name !== entry.name) errors.push(`${skillLabel}: frontmatter name must match its directory`);
       if (!metadata.description || metadata.description.length < 40) errors.push(`${skillLabel}: description is incomplete`);
       if (content.includes("[TODO:")) errors.push(`${skillLabel}: contains TODO placeholders`);
@@ -406,7 +449,7 @@ function discoverBundleSkills(topology, plugin, manifest, errors) {
     const uiCandidate = path.join(skillRoot, "agents", "openai.yaml");
     const uiFile = optionalCheckedFile(skillRoot, uiCandidate, `${skillLabel}: agents/openai.yaml`, errors);
     if (uiFile) {
-      const ui = readText(uiFile, `${skillLabel}: agents/openai.yaml`, errors);
+      const ui = readText(skillRoot, uiFile, `${skillLabel}: agents/openai.yaml`, errors);
       if (ui !== null && !ui.includes(`$${entry.name}`)) {
         errors.push(`${skillLabel}: default_prompt must mention $${entry.name}`);
       }
@@ -443,7 +486,7 @@ export function validatePluginBundle(topology, plugin) {
   );
   result.manifestPath = manifestPath;
   if (!manifestPath) return result;
-  const manifest = readJson(topology.rootReal, manifestPath, `${plugin.entry.name}: plugin.json`, errors);
+  const manifest = readJson(plugin.pluginRoot, manifestPath, `${plugin.entry.name}: plugin.json`, errors);
   result.manifest = manifest;
   if (!manifest) return result;
 
@@ -532,7 +575,7 @@ function validateStandardSchemas(topology, bundle, errors) {
     }
     const schemaPath = checkedPath(schemasRoot, path.join(schemasRoot, file), label, "file", errors);
     if (!schemaPath) continue;
-    const schema = readJson(topology.rootReal, schemaPath, label, errors);
+    const schema = readJson(schemasRoot, schemaPath, label, errors);
     if (!schema) continue;
     if (schema.$schema !== SCHEMA_DIALECT) {
       errors.push(`${file}: $schema must be ${SCHEMA_DIALECT}`);
@@ -560,7 +603,7 @@ function validateStandardRegistry(topology, bundle, errors) {
     errors,
   );
   if (!registryPath) return;
-  const registry = readJson(topology.rootReal, registryPath, `${PLUGIN_NAME}: rules/registry.json`, errors);
+  const registry = readJson(rulesRoot, registryPath, `${PLUGIN_NAME}: rules/registry.json`, errors);
   if (!registry) return;
   if (registry.schemaVersion !== "1.0") errors.push("registry.json: schemaVersion must be 1.0");
   if (!Array.isArray(registry.families)) {
@@ -720,7 +763,7 @@ function validateLocalMarkdownLink(root, file, target, errors) {
 function validateMarkdownLinks(root, files, errors) {
   const linkPattern = /\[[^\]]+\]\(([^)]+)\)/g;
   for (const file of files.filter((item) => item.endsWith(".md"))) {
-    const content = readText(file, relativeLabel(root, file), errors);
+    const content = readText(root, file, relativeLabel(root, file), errors);
     if (content === null) continue;
     for (const match of content.matchAll(linkPattern)) {
       try {
@@ -748,12 +791,14 @@ function validatePublicHygiene(root, files, errors) {
   ];
 
   for (const file of files) {
-    let metadata;
     let content;
     try {
-      metadata = fs.lstatSync(file);
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 1024 * 1024) continue;
-      content = fs.readFileSync(file);
+      const relative = relativeLabel(root, file);
+      content = readTrustedFile(root, file, relative, errors, {
+        maxBytes: 1024 * 1024,
+        skipInvalidType: true,
+      });
+      if (content === null) continue;
     } catch (error) {
       errors.push(`${relativeLabel(root, file)}: cannot inspect public content: ${error.message}`);
       continue;
@@ -820,7 +865,7 @@ export function validateRepositoryRelease(topology, bundles) {
   }
 
   const readmePath = checkedPath(root, path.join(root, "README.md"), "README.md", "file", errors);
-  const readme = readmePath ? readText(readmePath, "README.md", errors) : null;
+  const readme = readmePath ? readText(root, readmePath, "README.md", errors) : null;
   if (readme !== null && rootPackage) {
     if (!readme.includes(`${PLUGIN_NAME}@${MARKETPLACE_NAME}`)) errors.push("README: missing public plugin selector");
     if (!readme.includes(`--ref v${rootPackage.version}`)) errors.push(`README: stable installation must pin v${rootPackage.version}`);
@@ -830,7 +875,7 @@ export function validateRepositoryRelease(topology, bundles) {
   }
 
   const licensePath = checkedPath(root, path.join(root, "LICENSE"), "LICENSE", "file", errors);
-  const license = licensePath ? readText(licensePath, "LICENSE", errors) : null;
+  const license = licensePath ? readText(root, licensePath, "LICENSE", errors) : null;
   if (license !== null && (!license.includes("Apache License") || !license.includes("Version 2.0, January 2004"))) {
     errors.push("LICENSE: expected the Apache License 2.0 text");
   }

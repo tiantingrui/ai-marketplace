@@ -26,7 +26,7 @@ function isInsideDirectory(directory, candidate) {
   );
 }
 
-function checkedPluginPath(trustRoot, candidate, label, kind) {
+function inspectCheckedPluginPath(trustRoot, candidate, label, kind) {
   const absolute = path.resolve(candidate);
   if (!isInsideDirectory(trustRoot, absolute)) throw new Error(`${label} escapes the plugin root`);
   const relative = path.relative(trustRoot, absolute);
@@ -49,7 +49,49 @@ function checkedPluginPath(trustRoot, candidate, label, kind) {
   if (!validType) throw new Error(`${label} must be a regular ${kind}`);
   const real = fs.realpathSync(absolute);
   if (!isInsideDirectory(trustRoot, real)) throw new Error(`${label} real path escapes the plugin root`);
-  return real;
+  return Object.freeze({
+    path: real,
+    identity: Object.freeze({ dev: metadata.dev, ino: metadata.ino }),
+  });
+}
+
+function checkedPluginPath(trustRoot, candidate, label, kind) {
+  return inspectCheckedPluginPath(trustRoot, candidate, label, kind).path;
+}
+
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function readCheckedPluginText(trustRoot, candidate, label) {
+  const before = inspectCheckedPluginPath(trustRoot, candidate, label, "file");
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  let descriptor;
+  try {
+    descriptor = fs.openSync(before.path, fs.constants.O_RDONLY | noFollow);
+  } catch (error) {
+    throw new Error(`${label} changed while being opened or contains a symbolic link: ${error.message}`);
+  }
+
+  try {
+    const opened = fs.fstatSync(descriptor);
+    if (!opened.isFile() || !sameFileIdentity(before.identity, opened)) {
+      throw new Error(`${label} changed while being opened`);
+    }
+
+    const after = inspectCheckedPluginPath(trustRoot, candidate, label, "file");
+    const current = fs.lstatSync(after.path);
+    if (!current.isFile()
+      || current.isSymbolicLink()
+      || !sameFileIdentity(opened, current)
+      || !sameFileIdentity(before.identity, current)) {
+      throw new Error(`${label} changed while being opened`);
+    }
+
+    return Object.freeze({ path: after.path, content: fs.readFileSync(descriptor, "utf8") });
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }
 
 function optionalPluginFile(trustRoot, candidate, label) {
@@ -101,15 +143,14 @@ export function discoverManifestSkills(pluginRoot = PLUGIN_ROOT) {
   if (!rootMetadata.isDirectory()) throw new Error("Plugin root must be a directory");
   const pluginReal = fs.realpathSync(resolvedRoot);
 
-  const manifestPath = checkedPluginPath(
+  const manifestFile = readCheckedPluginText(
     pluginReal,
     path.join(pluginReal, ".codex-plugin", "plugin.json"),
     "Plugin manifest",
-    "file",
   );
   let manifest;
   try {
-    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(manifestFile.content);
   } catch (error) {
     throw new Error(`Plugin manifest cannot be read as JSON: ${error.message}`);
   }
@@ -186,8 +227,16 @@ function doctor() {
         errors.push(`Skill UI metadata is missing: ${skill.name}`);
         continue;
       }
-      const ui = fs.readFileSync(skill.uiFile, "utf8");
-      if (!ui.includes(`$${skill.name}`)) errors.push(`Skill UI metadata must mention $${skill.name}`);
+      try {
+        const ui = readCheckedPluginText(
+          skill.root,
+          skill.uiFile,
+          `Skill ${skill.name} UI metadata`,
+        ).content;
+        if (!ui.includes(`$${skill.name}`)) errors.push(`Skill UI metadata must mention $${skill.name}`);
+      } catch (error) {
+        errors.push(error.message);
+      }
     }
   } catch (error) {
     errors.push(error.message);

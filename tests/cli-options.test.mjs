@@ -89,6 +89,90 @@ function createPluginFixture(t, {
   return pluginRoot;
 }
 
+function restoreSwappedFile(target, backup) {
+  try {
+    fs.unlinkSync(target);
+  } catch {
+    // The swap may have been rejected before the replacement was installed.
+  }
+  try {
+    fs.renameSync(backup, target);
+  } catch {
+    // The original path is already in place when no swap occurred.
+  }
+}
+
+function runCopiedDoctorWithAtomicUiSwap(t) {
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ai-marketplace-cli-doctor-swap-"));
+  const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ai-marketplace-cli-doctor-outside-"));
+  t.after(() => fs.rmSync(pluginRoot, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(outsideRoot, { recursive: true, force: true }));
+
+  const scriptsRoot = path.join(ROOT, "plugins/frontend-engineering-standard/scripts");
+  fs.cpSync(scriptsRoot, path.join(pluginRoot, "scripts"), { recursive: true });
+  writeJson(path.join(pluginRoot, ".codex-plugin/plugin.json"), {
+    name: "fixture-plugin",
+    skills: "./capabilities/",
+  });
+  writeText(path.join(pluginRoot, "capabilities/custom-a/SKILL.md"), "---\nname: custom-a\n---\n");
+
+  const uiFile = path.join(pluginRoot, "capabilities/custom-a/agents/openai.yaml");
+  const uiBackup = `${uiFile}.original`;
+  const marker = "EXTERNAL_UI_MARKER";
+  const outsideUi = path.join(outsideRoot, "openai.yaml");
+  const traceFile = path.join(pluginRoot, "swap-trace.log");
+  const preloadFile = path.join(pluginRoot, "atomic-ui-swap.mjs");
+  writeText(uiFile, 'interface:\n  default_prompt: "Safe local prompt."\n');
+  writeText(outsideUi, `interface:\n  default_prompt: "Use $custom-a. ${marker}"\n`);
+  const matchedUiFile = fs.realpathSync(uiFile);
+  writeText(preloadFile, `
+import fs from "node:fs";
+import path from "node:path";
+
+const target = ${JSON.stringify(uiFile)};
+const matchedTarget = ${JSON.stringify(matchedUiFile)};
+const backup = ${JSON.stringify(uiBackup)};
+const outside = ${JSON.stringify(outsideUi)};
+const trace = ${JSON.stringify(traceFile)};
+const marker = ${JSON.stringify(marker)};
+const originalRealpathSync = fs.realpathSync;
+const originalReadFileSync = fs.readFileSync;
+let swapped = false;
+
+fs.realpathSync = (candidate, ...args) => {
+  const real = originalRealpathSync.call(fs, candidate, ...args);
+  if (!swapped && typeof candidate === "string" && path.resolve(candidate) === path.resolve(matchedTarget)) {
+    fs.renameSync(target, backup);
+    fs.symlinkSync(outside, target, "file");
+    fs.appendFileSync(trace, "swapped\\n");
+    swapped = true;
+  }
+  return real;
+};
+
+fs.readFileSync = (file, ...args) => {
+  const content = originalReadFileSync.call(fs, file, ...args);
+  if (String(content).includes(marker)) fs.appendFileSync(trace, "marker-read\\n");
+  return content;
+};
+
+process.on("exit", () => {
+  fs.realpathSync = originalRealpathSync;
+  fs.readFileSync = originalReadFileSync;
+  if (!swapped) return;
+  try { fs.unlinkSync(target); } catch {}
+  try { fs.renameSync(backup, target); } catch {}
+});
+`);
+
+  const cli = path.join(pluginRoot, "scripts/marketplace-cli.mjs");
+  const result = spawnSync(process.execPath, ["--import", pathToFileURL(preloadFile).href, cli, "doctor"], {
+    encoding: "utf8",
+  });
+  const trace = fs.existsSync(traceFile) ? fs.readFileSync(traceFile, "utf8").trim().split("\n") : [];
+  return { result, trace };
+}
+
 const INVALID_CASES = [
   {
     name: "unknown option",
@@ -298,6 +382,71 @@ test("discoverManifestSkills rejects symbolic links inside a skills bundle", asy
       /Skill custom-a UI metadata contains a symbolic link/,
     );
   });
+});
+
+test("discoverManifestSkills rejects a manifest swapped after path validation without reading it", async (t) => {
+  const pluginRoot = createPluginFixture(t, { skills: ["safe"], ui: ["safe"] });
+  const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ai-marketplace-cli-manifest-outside-"));
+  t.after(() => fs.rmSync(outsideRoot, { recursive: true, force: true }));
+  const manifest = path.join(pluginRoot, ".codex-plugin/plugin.json");
+  const backup = `${manifest}.original`;
+  const outsideManifest = path.join(outsideRoot, "plugin.json");
+  const marker = "EXTERNAL_MANIFEST_MARKER";
+  writeJson(outsideManifest, {
+    name: "fixture-plugin",
+    skills: "./attacker-capabilities/",
+    marker,
+  });
+  writeText(
+    path.join(pluginRoot, "attacker-capabilities/external-marker/SKILL.md"),
+    "---\nname: external-marker\n---\n",
+  );
+
+  const module = await import(pathToFileURL(CLI).href);
+  const originalRealpathSync = fs.realpathSync;
+  const originalReadFileSync = fs.readFileSync;
+  const matchedManifest = originalRealpathSync.call(fs, manifest);
+  let swapped = false;
+  let markerRead = false;
+  let thrown;
+  try {
+    fs.realpathSync = (candidate, ...args) => {
+      const real = originalRealpathSync.call(fs, candidate, ...args);
+      if (!swapped && typeof candidate === "string" && path.resolve(candidate) === path.resolve(matchedManifest)) {
+        fs.renameSync(manifest, backup);
+        fs.renameSync(outsideManifest, manifest);
+        swapped = true;
+      }
+      return real;
+    };
+    fs.readFileSync = (file, ...args) => {
+      const content = originalReadFileSync.call(fs, file, ...args);
+      if (String(content).includes(marker)) markerRead = true;
+      return content;
+    };
+    try {
+      module.discoverManifestSkills(pluginRoot);
+    } catch (error) {
+      thrown = error;
+    }
+  } finally {
+    fs.realpathSync = originalRealpathSync;
+    fs.readFileSync = originalReadFileSync;
+    if (swapped) restoreSwappedFile(manifest, backup);
+  }
+
+  assert.equal(swapped, true);
+  assert.equal(markerRead, false, "external manifest marker must not be read");
+  assert.match(thrown?.message ?? "", /symbolic link|changed while being opened/i);
+});
+
+test("doctor rejects UI metadata swapped after path validation without reading it", (t) => {
+  const { result, trace } = runCopiedDoctorWithAtomicUiSwap(t);
+
+  assert.ok(trace.includes("swapped"), trace.join(", "));
+  assert.ok(!trace.includes("marker-read"), trace.join(", "));
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /symbolic link|changed while being opened/i);
 });
 
 test("doctor passes for the real plugin using manifest-discovered skills", () => {

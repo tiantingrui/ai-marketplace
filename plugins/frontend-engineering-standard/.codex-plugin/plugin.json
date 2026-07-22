@@ -1,6 +1,6 @@
 {
   "name": "frontend-engineering-standard",
-  "version": "1.0.0+codex.20260721112816",
+  "version": "1.0.0+codex.20260722035244",
   "description": "Configurable repository rule checks, change-impact analysis, and evidence-based pull-request review.",
   "license": "Apache-2.0",
   "author": {

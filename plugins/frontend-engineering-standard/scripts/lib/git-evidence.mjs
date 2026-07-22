@@ -73,8 +73,34 @@ export function readRepositoryTextFile(repo, file, { maxBytes = MAX_TEXT_FILE_BY
   }
   if (!isInsideDirectory(repository, realFile)) return null;
 
-  const content = fs.readFileSync(realFile, "utf8");
-  return content.includes("\0") ? null : content;
+  let descriptor;
+  try {
+    const openFlags = (fs.constants.O_RDONLY ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+    descriptor = fs.openSync(absolute, openFlags);
+    const openedMetadata = fs.fstatSync(descriptor);
+    if (!openedMetadata.isFile() || openedMetadata.size > maxBytes) return null;
+    if (metadata.dev !== openedMetadata.dev || metadata.ino !== openedMetadata.ino) return null;
+
+    const openedRealFile = fs.realpathSync(absolute);
+    if (!isInsideDirectory(repository, openedRealFile)) return null;
+    const pathMetadata = fs.statSync(absolute);
+    if (pathMetadata.dev !== openedMetadata.dev || pathMetadata.ino !== openedMetadata.ino) return null;
+
+    const contentBuffer = fs.readFileSync(descriptor);
+    if (contentBuffer.length > maxBytes) return null;
+    const content = contentBuffer.toString("utf8");
+    return content.includes("\0") ? null : content;
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        fs.closeSync(descriptor);
+      } catch {
+        // The descriptor may already have been closed by the runtime after a failed read.
+      }
+    }
+  }
 }
 
 function gitOutputText(output) {

@@ -123,6 +123,60 @@ function parseCall(call) {
   return { cwd: cwd.slice(4), args };
 }
 
+function withFileSwapAfterRealpath({
+  file,
+  externalFile,
+  marker,
+  safeContent,
+  restoreAfterRead = false,
+}, callback) {
+  const originalRealpathSync = fs.realpathSync;
+  const originalReadFileSync = fs.readFileSync;
+  const absolute = originalRealpathSync(path.resolve(file));
+  let sequence = 0;
+  let markerRead = false;
+
+  function replaceAtomically(createReplacement) {
+    const replacement = `${absolute}.swap-${process.pid}-${sequence}`;
+    sequence += 1;
+    createReplacement(replacement);
+    fs.renameSync(replacement, absolute);
+  }
+
+  fs.realpathSync = function swappedRealpathSync(candidate, ...args) {
+    const real = originalRealpathSync.call(fs, candidate, ...args);
+    if (real === absolute && !fs.lstatSync(absolute).isSymbolicLink()) {
+      replaceAtomically((replacement) => fs.symlinkSync(externalFile, replacement));
+    }
+    return real;
+  };
+  fs.readFileSync = function swappedReadFileSync(candidate, ...args) {
+    const content = originalReadFileSync.call(fs, candidate, ...args);
+    if (
+      (Buffer.isBuffer(content) && content.includes(Buffer.from(marker)))
+      || (typeof content === "string" && content.includes(marker))
+    ) {
+      markerRead = true;
+    }
+    if (
+      restoreAfterRead
+      && typeof candidate !== "number"
+      && path.resolve(String(candidate)) === absolute
+      && fs.lstatSync(absolute).isSymbolicLink()
+    ) {
+      replaceAtomically((replacement) => fs.writeFileSync(replacement, safeContent));
+    }
+    return content;
+  };
+
+  try {
+    return { value: callback(), markerRead };
+  } finally {
+    fs.realpathSync = originalRealpathSync;
+    fs.readFileSync = originalReadFileSync;
+  }
+}
+
 function snapshotKeys(snapshot) {
   return Object.keys(snapshot).sort();
 }
@@ -375,6 +429,68 @@ test("repository text reads require a safe POSIX relative regular file inside th
     "dir/file.txt\0tail",
   ]) {
     assert.equal(readRepositoryTextFile(repo, unsafe), null, unsafe);
+  }
+});
+
+test("repository text reads reject a file swapped to an external symlink after realpath", (t) => {
+  const repo = createTestRepository({ "placeholder.txt": "tracked\n" });
+  const externalDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "git-evidence-swap-outside-"));
+  const externalFile = path.join(externalDirectory, "outside.txt");
+  const file = "src/untracked.txt";
+  const absolute = path.join(repo, file);
+  const safeContent = "safe-untracked-content\n";
+  writeFiles(repo, { [file]: safeContent });
+  fs.writeFileSync(externalFile, "external-swap-marker\n");
+  t.after(() => {
+    removeTestRepository(repo);
+    fs.rmSync(externalDirectory, { recursive: true, force: true });
+  });
+
+  const { value: content, markerRead } = withFileSwapAfterRealpath({
+    file: absolute,
+    externalFile,
+    marker: "external-swap-marker",
+    safeContent,
+  }, () => readRepositoryTextFile(repo, file));
+  assert.equal(content, null);
+  assert.equal(markerRead, false);
+});
+
+test("swapped untracked files never enter Git evidence", (t) => {
+  const repo = createTestRepository({ "placeholder.txt": "tracked\n" });
+  const externalDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "git-evidence-evidence-swap-outside-"));
+  const externalFile = path.join(externalDirectory, "outside.txt");
+  const file = "src/untracked.txt";
+  const absolute = path.join(repo, file);
+  const safeContent = "safe-untracked-content\n";
+  writeFiles(repo, { [file]: safeContent });
+  fs.writeFileSync(externalFile, "external-evidence-marker\n");
+  t.after(() => {
+    removeTestRepository(repo);
+    fs.rmSync(externalDirectory, { recursive: true, force: true });
+  });
+  const context = createComparisonContext(repo);
+
+  const { value: evidence, markerRead } = withFileSwapAfterRealpath({
+    file: absolute,
+    externalFile,
+    marker: "external-evidence-marker",
+    safeContent,
+    restoreAfterRead: true,
+  }, () => {
+    const lines = collectChangedLines(repo, context);
+    const safeDiff = collectSafeDiff(repo, context);
+    const nonWhitespaceDiff = collectNonWhitespaceDiff(repo, context);
+    const files = collectChangedFiles(repo, context);
+    return { lines, safeDiff, nonWhitespaceDiff, files };
+  });
+  assert.equal(markerRead, false);
+  assert.deepEqual(evidence.lines, []);
+  assert.equal(evidence.safeDiff, "");
+  assert.equal(evidence.nonWhitespaceDiff, "");
+  assert.deepEqual(evidence.files, []);
+  for (const output of [JSON.stringify(evidence.lines), evidence.safeDiff, evidence.nonWhitespaceDiff]) {
+    assert.ok(!output.includes("external-evidence-marker"));
   }
 });
 
