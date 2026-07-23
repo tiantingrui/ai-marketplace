@@ -29,6 +29,9 @@ const REQUIRED_SCHEMAS = [
 ];
 const SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema";
 const SCHEMA_ID_BASE = "https://github.com/tiantingrui/ai-marketplace/plugins/frontend-engineering-standard/schemas/";
+const UNSAFE_DIAGNOSTIC_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
+const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const SHELL_ASSIGNMENT_WORD_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const REQUIRED_PUBLIC_FILES = [
   ".github/CODEOWNERS",
   ".github/pull_request_template.md",
@@ -47,6 +50,271 @@ const REQUIRED_PUBLIC_FILES = [
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function splitShellCommandSegments(content) {
+  const segments = [];
+  let segment = "";
+  let quote = null;
+  const finishSegment = () => {
+    const trimmed = segment.replace(/^[\t ]+|[\t ]+$/g, "");
+    if (trimmed) segments.push(trimmed);
+    segment = "";
+  };
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (quote === "'") {
+      segment += character;
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') {
+        quote = null;
+        segment += character;
+      } else if (character === "\\") {
+        const next = content[index + 1];
+        if (next === "\n") index += 1;
+        else if (next === "\r" && content[index + 2] === "\n") index += 2;
+        else if (next !== undefined) {
+          segment += `${character}${next}`;
+          index += 1;
+        } else {
+          segment += character;
+        }
+      } else {
+        segment += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      segment += character;
+    } else if (character === "\\") {
+      const next = content[index + 1];
+      if (next === "\n") index += 1;
+      else if (next === "\r" && content[index + 2] === "\n") index += 2;
+      else if (next !== undefined) {
+        segment += `${character}${next}`;
+        index += 1;
+      } else {
+        segment += character;
+      }
+    } else if (character === "#" && (segment === "" || /\s/.test(segment.at(-1)))) {
+      while (index + 1 < content.length && !["\r", "\n"].includes(content[index + 1])) index += 1;
+      finishSegment();
+    } else if (character === "\r" || character === "\n") {
+      if (character === "\r" && content[index + 1] === "\n") index += 1;
+      finishSegment();
+    } else if (";&|()".includes(character)) {
+      finishSegment();
+    } else {
+      segment += character;
+    }
+  }
+  finishSegment();
+  return segments;
+}
+
+function parseShellWords(command) {
+  const words = [];
+  let word = "";
+  let active = false;
+  let quote = null;
+  const finishWord = () => {
+    if (!active) return;
+    words.push(word);
+    word = "";
+    active = false;
+  };
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+        active = true;
+      } else if (quote === '"' && character === "\\" && index + 1 < command.length) {
+        const next = command[index + 1];
+        if (["$", "`", '"', "\\"].includes(next)) {
+          index += 1;
+          word += next;
+        } else {
+          word += character;
+        }
+        active = true;
+      } else {
+        word += character;
+        active = true;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      active = true;
+    } else if (character === " " || character === "\t") {
+      finishWord();
+    } else if (character === "\\" && index + 1 < command.length) {
+      index += 1;
+      word += command[index];
+      active = true;
+    } else {
+      word += character;
+      active = true;
+    }
+  }
+  finishWord();
+  return { words, complete: quote === null };
+}
+
+function marketplaceAddCommands(content) {
+  const commands = [];
+  // This intentionally recognizes only simple shell segments that begin with the exact
+  // Marketplace add command. Other commands and inline prose are outside this parser's scope.
+  const visibleContent = markdownVisibleLines(content).map(({ visibleLine }) => visibleLine).join("\n");
+  for (const segment of splitShellCommandSegments(visibleContent)) {
+    const parsed = parseShellWords(segment);
+    let offset = parsed.words[0] === "$" ? 1 : 0;
+    while (SHELL_ASSIGNMENT_WORD_PATTERN.test(parsed.words[offset] ?? "")) offset += 1;
+    if (
+      parsed.words[offset] === "codex"
+      && parsed.words[offset + 1] === "plugin"
+      && parsed.words[offset + 2] === "marketplace"
+      && parsed.words[offset + 3] === "add"
+    ) {
+      commands.push({ ...parsed, arguments: parsed.words.slice(offset + 4) });
+    }
+  }
+  return commands;
+}
+
+function stableInstallationRefs(content, label, errors) {
+  const refs = [];
+  let invalidCardinality = false;
+  let unsafeRef = false;
+  for (const command of marketplaceAddCommands(content)) {
+    const commandRefs = [];
+    for (let index = 0; index < command.arguments.length; index += 1) {
+      const argument = command.arguments[index];
+      if (argument === "--ref") {
+        const next = command.arguments[index + 1];
+        if (next === undefined || next.startsWith("--")) {
+          commandRefs.push(null);
+        } else {
+          commandRefs.push(next);
+          index += 1;
+        }
+      } else if (argument.startsWith("--ref=")) {
+        commandRefs.push(argument.slice("--ref=".length));
+      }
+    }
+
+    if (!command.complete || commandRefs.length !== 1 || !commandRefs[0]) {
+      invalidCardinality = true;
+      continue;
+    }
+    if (UNSAFE_DIAGNOSTIC_CHARACTER_PATTERN.test(commandRefs[0])) {
+      unsafeRef = true;
+      continue;
+    }
+    refs.push(commandRefs[0]);
+  }
+  if (invalidCardinality) {
+    errors.push(`${label}: each Marketplace add command must have exactly one non-empty --ref`);
+  }
+  if (unsafeRef) errors.push(`${label}: Marketplace add ref must not contain control characters`);
+  return unique(refs);
+}
+
+function validateStableInstallationRefs(content, label, currentRef, errors, { readme = false } = {}) {
+  const refs = stableInstallationRefs(content, label, errors);
+  if (!refs.includes(currentRef)) errors.push(`${label}: stable installation must pin ${currentRef}`);
+
+  let unexpected = refs.filter((ref) => ref !== currentRef);
+  if (readme && unexpected.includes("main")) {
+    errors.push("README: stable installation must not track main");
+    unexpected = unexpected.filter((ref) => ref !== "main");
+  }
+  if (unexpected.length > 0) {
+    errors.push(`${label}: stable installation refs must only use ${currentRef}; found ${unexpected.join(", ")}`);
+  }
+}
+
+function stripHtmlCommentsFromMarkdownLine(line, state) {
+  let visible = "";
+  let columnPreserving = "";
+  let cursor = 0;
+  while (cursor < line.length) {
+    if (state.inComment) {
+      const end = line.indexOf("-->", cursor);
+      if (end === -1) return { visible, columnPreserving };
+      columnPreserving += " ".repeat(end + 3 - cursor);
+      cursor = end + 3;
+      state.inComment = false;
+      continue;
+    }
+
+    const start = line.indexOf("<!--", cursor);
+    if (start === -1) {
+      const remainder = line.slice(cursor);
+      return {
+        visible: visible + remainder,
+        columnPreserving: columnPreserving + remainder,
+      };
+    }
+    const remainder = line.slice(cursor, start);
+    visible += remainder;
+    columnPreserving += remainder;
+    const end = line.indexOf("-->", start + 4);
+    if (end === -1) {
+      state.inComment = true;
+      return { visible, columnPreserving };
+    }
+    columnPreserving += " ".repeat(end + 3 - start);
+    cursor = end + 3;
+  }
+  return { visible, columnPreserving };
+}
+
+function markdownVisibleLines(content) {
+  const commentState = { inComment: false };
+  let fence = null;
+  const lines = [];
+  for (const rawLine of content.split(/\r?\n/)) {
+    if (fence) {
+      const closingPattern = new RegExp(
+        `^ {0,3}${escapeRegExp(fence.character)}{${fence.length},}[\\t ]*$`,
+      );
+      if (closingPattern.test(rawLine)) fence = null;
+      lines.push({ line: rawLine, visibleLine: rawLine, fenced: true });
+      continue;
+    }
+
+    if (!commentState.inComment) {
+      const opening = rawLine.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (opening) {
+        fence = { character: opening[1][0], length: opening[1].length };
+        lines.push({ line: rawLine, visibleLine: rawLine, fenced: true });
+        continue;
+      }
+    }
+
+    const { visible, columnPreserving } = stripHtmlCommentsFromMarkdownLine(rawLine, commentState);
+    lines.push({ line: columnPreserving, visibleLine: visible, fenced: false });
+  }
+  return lines;
+}
+
+function hasMarkdownReleaseHeading(content, version) {
+  const headingPattern = new RegExp(`^ {0,3}## ${escapeRegExp(version)} -`);
+  return markdownVisibleLines(content).some(({ line, fenced }) => (
+    !fenced && headingPattern.test(line)
+  ));
 }
 
 function toPosix(value) {
@@ -860,7 +1128,17 @@ export function validateRepositoryRelease(topology, bundles) {
 
   const packagePath = checkedPath(root, path.join(root, "package.json"), "package.json", "file", errors);
   const rootPackage = packagePath ? readJson(root, packagePath, "package.json", errors) : null;
-  if (rootPackage && standard?.manifest && standard.manifest.version?.split("+")[0] !== rootPackage.version) {
+  let rootVersion = null;
+  if (rootPackage) {
+    if (typeof rootPackage.version !== "string" || rootPackage.version.trim() === "") {
+      errors.push("package.json: version must be a non-empty string");
+    } else if (!SEMVER_PATTERN.test(rootPackage.version)) {
+      errors.push("package.json: version must use semver");
+    } else {
+      rootVersion = rootPackage.version;
+    }
+  }
+  if (rootVersion && standard?.manifest && standard.manifest.version?.split("+")[0] !== rootVersion) {
     errors.push("package.json and plugin base versions must match");
   }
 
@@ -868,10 +1146,37 @@ export function validateRepositoryRelease(topology, bundles) {
   const readme = readmePath ? readText(root, readmePath, "README.md", errors) : null;
   if (readme !== null && rootPackage) {
     if (!readme.includes(`${PLUGIN_NAME}@${MARKETPLACE_NAME}`)) errors.push("README: missing public plugin selector");
-    if (!readme.includes(`--ref v${rootPackage.version}`)) errors.push(`README: stable installation must pin v${rootPackage.version}`);
-    if (readme.includes("--ref main")) errors.push("README: stable installation must not track main");
+    if (rootVersion) validateStableInstallationRefs(readme, "README", `v${rootVersion}`, errors, { readme: true });
     if (!readme.includes("https://github.com/tiantingrui/ai-marketplace")) errors.push("README: missing public repository URL");
     if (!readme.includes("Apache License 2.0")) errors.push("README: Apache-2.0 license must be documented");
+  }
+
+  if (rootVersion) {
+    const gettingStartedPath = checkedPath(
+      root,
+      path.join(root, "docs", "getting-started.md"),
+      "docs/getting-started.md",
+      "file",
+      errors,
+    );
+    const gettingStarted = gettingStartedPath
+      ? readText(root, gettingStartedPath, "docs/getting-started.md", errors)
+      : null;
+    if (gettingStarted !== null) {
+      validateStableInstallationRefs(gettingStarted, "getting-started", `v${rootVersion}`, errors);
+    }
+
+    const changelogPath = checkedPath(
+      root,
+      path.join(root, "CHANGELOG.md"),
+      "CHANGELOG.md",
+      "file",
+      errors,
+    );
+    const changelog = changelogPath ? readText(root, changelogPath, "CHANGELOG.md", errors) : null;
+    if (changelog !== null && !hasMarkdownReleaseHeading(changelog, rootVersion)) {
+      errors.push(`CHANGELOG: missing ${rootVersion} release heading`);
+    }
   }
 
   const licensePath = checkedPath(root, path.join(root, "LICENSE"), "LICENSE", "file", errors);
