@@ -40,11 +40,13 @@ node -e 'const fs=require("node:fs"); const text=fs.readFileSync("docs/roadmap.m
 | 总体状态 | `待发布`，完成度约 `90%` |
 | Pull Request | [PR #1](https://github.com/tiantingrui/ai-marketplace/pull/1) 为草稿，目标分支 `main`，合并状态 `CLEAN` |
 | CI | Ubuntu、macOS × Node.js 20、22、24 共六组检查全部通过 |
-| 本地验证 | `npm run validate`：257 项，256 通过、1 个环境相关跳过、0 失败；详见 [v1.0.1 发布验收记录](releases/2026-07-22-v1.0.1-validation.md) |
+| 本地验证 | `npm run validate`：257 项，256 通过、1 个环境相关跳过、0 失败；详见 [v1.0.1 发布验收记录](../../releases/2026-07-22-v1.0.1-validation.md) |
 | 当前阻塞 | 无技术阻塞；尚待正式评审与发布授权 |
 | 下一步 | PR 转正式评审 → 合并 → 创建 `v1.0.1` 标签 → 远端标签安装冒烟 → GitHub Release |
 | 最近更新 | `2026-07-23` |
 ```
+
+说明：上述目标仅用于使本计划文件自身可验证；实际写入 `docs/roadmap.md` 时必须使用 `releases/2026-07-22-v1.0.1-validation.md`。
 
 - [ ] **步骤 3：增加版本进度表**
 
