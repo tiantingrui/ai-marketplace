@@ -320,6 +320,155 @@ test("generic bundle allows an empty skills directory and missing UI metadata", 
   assert.equal(bundles[1].skills[0].uiFile, null);
 });
 
+test("generic bundle rejects a Skill runtime reference that is missing from the plugin", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks that declared deterministic runtimes ship with the plugin.",
+    "---",
+    "",
+    "# Audit",
+    "",
+    "```bash",
+    "node ../../scripts/marketplace-cli.mjs rules --repo <target-repo>",
+    "```",
+    "",
+  ].join("\n"));
+
+  const bundle = validatePluginBundle(topology, plugin);
+
+  assert.match(
+    bundle.errors.join("\n"),
+    /Skill runtime \.\.\/\.\.\/scripts\/marketplace-cli\.mjs cannot be accessed/,
+  );
+});
+
+test("generic bundle accepts a Skill runtime reference shipped inside the plugin", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks a deterministic runtime included with the plugin bundle.",
+    "---",
+    "",
+    "node ../../scripts/marketplace-cli.mjs rules --repo <target-repo>",
+    "",
+  ].join("\n"));
+  writeText(path.join(pluginRoot, "scripts/marketplace-cli.mjs"), "export {};\n");
+
+  const bundle = validatePluginBundle(topology, plugin);
+
+  assert.deepEqual(bundle.errors, []);
+});
+
+test("generic bundle rejects a Skill runtime reference that escapes the plugin root", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks that deterministic runtimes cannot escape the plugin root.",
+    "---",
+    "",
+    "node ../../../scripts/marketplace-cli.mjs rules --repo <target-repo>",
+    "",
+  ].join("\n"));
+
+  const bundle = validatePluginBundle(topology, plugin);
+
+  assert.match(
+    bundle.errors.join("\n"),
+    /Skill runtime \.\.\/\.\.\/\.\.\/scripts\/marketplace-cli\.mjs escapes its trust root/,
+  );
+});
+
+test("generic bundle validates the complete quoted Skill runtime token", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks that quoted runtime tokens cannot be accepted by a valid prefix.",
+    "---",
+    "",
+    'node "../../scripts/runtime with spaces.mjs" rules',
+    "",
+  ].join("\n"));
+  writeText(path.join(pluginRoot, "scripts/runtime"), "prefix only\n");
+
+  const bundle = validatePluginBundle(topology, plugin);
+
+  assert.match(bundle.errors.join("\n"), /Skill runtime \.\.\/\.\.\/scripts\/runtime with spaces\.mjs cannot be accessed/);
+});
+
+test("generic bundle ignores Skill runtime examples hidden in HTML comments", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks that commented runtime examples do not declare plugin files.",
+    "---",
+    "",
+    "<!-- node ../../scripts/removed-runtime.mjs rules -->",
+    "",
+  ].join("\n"));
+
+  const bundle = validatePluginBundle(topology, plugin);
+
+  assert.deepEqual(bundle.errors, []);
+});
+
+test("generic bundle rejects Skill runtime path casing that differs from the plugin", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks runtime path casing for cross-platform plugin installation.",
+    "---",
+    "",
+    "node ../../Scripts/marketplace-cli.mjs rules",
+    "",
+  ].join("\n"));
+  writeText(path.join(pluginRoot, "scripts/marketplace-cli.mjs"), "export {};\n");
+
+  const bundle = validatePluginBundle(topology, plugin);
+
+  assert.match(bundle.errors.join("\n"), /path casing does not match the plugin bundle/);
+});
+
+test("generic bundle redacts unsafe characters from Skill runtime diagnostics", (t) => {
+  const { pluginRoot, topology, plugin } = createSingleBundleFixture(t, "team-standard", {
+    skills: ["audit"],
+  });
+  const unsafe = "\u202e";
+  writeText(path.join(pluginRoot, "skills/audit/SKILL.md"), [
+    "---",
+    "name: audit",
+    "description: This fixture checks that unsafe runtime tokens never enter validator diagnostics.",
+    "---",
+    "",
+    `node "../../scripts/${unsafe}runtime.mjs" rules`,
+    "",
+  ].join("\n"));
+
+  const bundle = validatePluginBundle(topology, plugin);
+  const errors = bundle.errors.join("\n");
+
+  assert.match(errors, /Skill runtime path contains unsafe control characters/);
+  assert.equal(errors.includes(unsafe), false);
+});
+
 test("topology rejects an empty plugin list without throwing", (t) => {
   const root = createFixture(t);
   writeMarketplace(root, []);
