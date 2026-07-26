@@ -38,6 +38,8 @@ Marketplace 只提供通用引擎。应用名、共享包、框架封装、同�
 
 根校验器从 `.agents/plugins/marketplace.json` 遍历本仓库的本地插件条目，再分别执行 Marketplace topology、通用 plugin bundle、插件专属门禁和仓库发布门禁。通用层允许插件不声明 Skill；`frontend-engineering-standard` 专属层仍要求完整运行时、非空 Skill 集和 UI 元数据。
 
+当 Skill 命令显式使用 `node` 调用插件内相对脚本时，通用 bundle 门禁会按完整 shell token 校验该运行时已随插件打包，同时检查词法范围、真实路径、符号链接和路径大小写；HTML 注释中的历史示例不形成运行时声明。
+
 所有插件目录、manifest、能力目录和契约引用均拒绝符号链接，并在 `realpath` 后确认没有越出对应信任根。
 
 ## 机器契约与规则注册表

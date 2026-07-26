@@ -559,6 +559,41 @@ function parseFrontmatter(root, file, label, errors) {
   return { content, metadata };
 }
 
+function validateSkillRuntimeReferences(plugin, skillRoot, content, skillLabel, errors) {
+  const visibleContent = markdownVisibleLines(content).map(({ visibleLine }) => visibleLine).join("\n");
+  const references = [];
+  for (const segment of splitShellCommandSegments(visibleContent)) {
+    const parsed = parseShellWords(segment);
+    let offset = parsed.words[0] === "$" ? 1 : 0;
+    while (SHELL_ASSIGNMENT_WORD_PATTERN.test(parsed.words[offset] ?? "")) offset += 1;
+    if (!parsed.complete || parsed.words[offset] !== "node") continue;
+    const reference = parsed.words[offset + 1];
+    if (!reference || reference.startsWith("-") || !/^\.\.?\//.test(reference)) continue;
+    references.push(reference);
+  }
+  for (const reference of unique(references)) {
+    if (UNSAFE_DIAGNOSTIC_CHARACTER_PATTERN.test(reference)) {
+      errors.push(`${skillLabel}: Skill runtime path contains unsafe control characters`);
+      continue;
+    }
+    const candidate = path.resolve(skillRoot, ...reference.split("/"));
+    if (isInsideDirectory(plugin.pluginRoot, candidate)) {
+      const relative = toPosix(path.relative(plugin.pluginRoot, candidate));
+      if (inspectExactPathCase(plugin.pluginRoot, relative) === "mismatch") {
+        errors.push(`${skillLabel}: Skill runtime ${reference} path casing does not match the plugin bundle`);
+        continue;
+      }
+    }
+    checkedPath(
+      plugin.pluginRoot,
+      candidate,
+      `${skillLabel}: Skill runtime ${reference}`,
+      "file",
+      errors,
+    );
+  }
+}
+
 function validateEntryPolicy(entry, label, errors) {
   if (typeof entry.category !== "string" || entry.category.trim() === "") {
     errors.push(`${label}: category is required`);
@@ -712,6 +747,7 @@ function discoverBundleSkills(topology, plugin, manifest, errors) {
       if (metadata.name !== entry.name) errors.push(`${skillLabel}: frontmatter name must match its directory`);
       if (!metadata.description || metadata.description.length < 40) errors.push(`${skillLabel}: description is incomplete`);
       if (content.includes("[TODO:")) errors.push(`${skillLabel}: contains TODO placeholders`);
+      validateSkillRuntimeReferences(plugin, skillRoot, content, skillLabel, errors);
     }
 
     const uiCandidate = path.join(skillRoot, "agents", "openai.yaml");
